@@ -58,7 +58,36 @@ async def write_triples(
                     })
                     continue
 
-                # Post to API
+                # Check if triple with same subject+predicate exists (for single-valued predicates)
+                existing_response = await client.get(
+                    f"{settings.agent_api_base}/triples",
+                    params={
+                        "subject_id": triple["subject_id"],
+                        "predicate": triple["predicate"],
+                    },
+                    timeout=10.0,
+                )
+
+                if existing_response.status_code == 200:
+                    existing_triples = existing_response.json()
+                    if existing_triples:
+                        # Update existing triple instead of creating new one
+                        existing_id = existing_triples[0]["id"]
+                        response = await client.patch(
+                            f"{settings.agent_api_base}/triples/{existing_id}",
+                            json={"object_value": triple["object_value"]},
+                            timeout=10.0,
+                        )
+                        if response.status_code == 200:
+                            results.append({
+                                "success": True,
+                                "action": "updated",
+                                "triple": response.json(),
+                            })
+                            continue
+                        # If update failed, fall through to create
+
+                # Create new triple
                 response = await client.post(
                     f"{settings.agent_api_base}/triples",
                     json=triple,
@@ -69,6 +98,7 @@ async def write_triples(
                 if response.status_code == 201:
                     results.append({
                         "success": True,
+                        "action": "created",
                         "triple": response.json(),
                     })
                 elif response.status_code == 400:

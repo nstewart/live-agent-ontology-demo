@@ -34,28 +34,43 @@ async def search_orders(
     settings = get_settings()
 
     # Build OpenSearch query
-    must_clauses = [
-        {
-            "multi_match": {
-                "query": query,
-                "fields": [
-                    "order_number^3",
-                    "customer_name^2",
-                    "customer_address",
-                    "store_name",
-                    "store_zone",
-                ],
-                "type": "best_fields",
-                "fuzziness": "AUTO",
+    # Check if query is a generic "get all" type query
+    generic_queries = ["all", "all orders", "*", "show all", "list all", "everything"]
+    is_generic = query.lower().strip() in generic_queries
+
+    must_clauses = []
+
+    if not is_generic:
+        # Use multi_match for specific searches
+        must_clauses.append(
+            {
+                "multi_match": {
+                    "query": query,
+                    "fields": [
+                        "order_number^3",
+                        "customer_name^2",
+                        "customer_address",
+                        "store_name",
+                        "store_zone",
+                    ],
+                    "type": "best_fields",
+                    "fuzziness": "AUTO",
+                }
             }
-        }
-    ]
+        )
 
     if status:
         must_clauses.append({"term": {"order_status": status}})
 
+    # Build the final query
+    if must_clauses:
+        query_body = {"bool": {"must": must_clauses}}
+    else:
+        # Match all documents when no filters
+        query_body = {"match_all": {}}
+
     search_body = {
-        "query": {"bool": {"must": must_clauses}},
+        "query": query_body,
         "size": limit,
         "sort": [{"effective_updated_at": {"order": "desc"}}],
     }

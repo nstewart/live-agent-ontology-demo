@@ -1,9 +1,10 @@
 """FreshMart Operations Assistant - LangGraph implementation."""
 
+import json
 import operator
 from typing import Annotated, Literal, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -61,7 +62,7 @@ def get_llm():
         from langchain_anthropic import ChatAnthropic
 
         return ChatAnthropic(
-            model="claude-3-sonnet-20240229",
+            model=settings.llm_model,
             anthropic_api_key=settings.anthropic_api_key,
         )
     elif settings.openai_api_key:
@@ -80,8 +81,35 @@ async def agent_node(state: AgentState) -> AgentState:
     llm = get_llm()
     llm_with_tools = llm.bind_tools(TOOLS)
 
-    # Build messages with system prompt
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
+    # Build messages with system prompt, ensuring all messages have non-empty content
+    # (Anthropic API requires non-empty content except for final assistant message)
+    filtered_messages = []
+    for msg in state["messages"]:
+        if isinstance(msg, AIMessage):
+            # For AI messages with tool calls but no content, add placeholder
+            if not msg.content and hasattr(msg, "tool_calls") and msg.tool_calls:
+                msg = AIMessage(
+                    content="I'll use a tool to help with that.",
+                    tool_calls=msg.tool_calls,
+                )
+        elif isinstance(msg, ToolMessage):
+            # For tool messages with empty content (e.g., empty list from search),
+            # convert to a string representation
+            content = msg.content
+            if not content or (isinstance(content, list) and len(content) == 0):
+                msg = ToolMessage(
+                    content="No results found.",
+                    tool_call_id=msg.tool_call_id,
+                )
+            elif isinstance(content, list):
+                # Ensure list content is converted to string for Anthropic
+                msg = ToolMessage(
+                    content=json.dumps(content),
+                    tool_call_id=msg.tool_call_id,
+                )
+        filtered_messages.append(msg)
+
+    messages = [SystemMessage(content=SYSTEM_PROMPT)] + filtered_messages
 
     # Get response
     response = await llm_with_tools.ainvoke(messages)

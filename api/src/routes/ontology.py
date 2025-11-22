@@ -24,7 +24,12 @@ async def get_session() -> AsyncSession:
     """Dependency to get database session."""
     factory = get_pg_session_factory()
     async with factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def get_ontology_service(session: AsyncSession = Depends(get_session)) -> OntologyService:

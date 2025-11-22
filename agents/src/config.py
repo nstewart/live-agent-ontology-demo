@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    llm_model: str = "gpt-4-turbo-preview"
+    llm_model: str = "claude-sonnet-4-20250514"  # Default for Anthropic; use "gpt-4-turbo" for OpenAI
 
     # Logging
     log_level: str = "INFO"
