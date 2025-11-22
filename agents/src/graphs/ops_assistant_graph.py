@@ -68,7 +68,7 @@ def get_llm():
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=settings.model_name,
+            model=settings.llm_model,
             openai_api_key=settings.openai_api_key,
         )
     else:

@@ -185,12 +185,33 @@ The LangGraph-powered ops assistant can:
 - Update order status
 - Query the ontology
 
+### Prerequisites
+
+The agent requires an LLM API key. Add one to your `.env` file:
+
+```bash
+# Option 1: Anthropic (recommended)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Option 2: OpenAI
+OPENAI_API_KEY=sk-...
+```
+
+### Starting the Agent Service
+
+```bash
+# Start with the agent profile
+docker-compose --profile agent up -d
+
+# Check configuration
+docker-compose exec agents python -m src.main check
+```
+
 ### Interactive Mode
 
 ```bash
-# Start the agent CLI
-docker-compose --profile agent up -d
-docker-compose exec agents python -m src.main
+# Start interactive chat
+docker-compose exec -it agents python -m src.main chat
 
 # Example queries:
 > Show all OUT_FOR_DELIVERY orders
@@ -202,7 +223,21 @@ docker-compose exec agents python -m src.main
 ### Single Command
 
 ```bash
-python -m src.main "Show all orders at BK-01 that are out for delivery"
+docker-compose exec agents python -m src.main chat "Show all orders at BK-01 that are out for delivery"
+```
+
+### HTTP API
+
+The agent also exposes an HTTP API on port 8081:
+
+```bash
+# Health check
+curl http://localhost:8081/health
+
+# Chat with the agent
+curl -X POST http://localhost:8081/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Show all OUT_FOR_DELIVERY orders"}'
 ```
 
 ## Development
@@ -210,11 +245,25 @@ python -m src.main "Show all orders at BK-01 that are out for delivery"
 ### Running Tests
 
 ```bash
-# API tests
-docker-compose exec api pytest -v
+# API tests (requires database connection)
+cd api
+export PG_HOST=localhost PG_PORT=5432 PG_USER=postgres PG_PASSWORD=postgres PG_DATABASE=freshmart
+python -m pytest tests/ -v
+
+# Or run inside container
+docker-compose exec api python -m pytest tests/ -v
+
+# Search-sync tests
+cd search-sync
+python -m pytest tests/ -v
 
 # Web tests
-docker-compose exec web npm test
+cd web
+npm test -- --run
+
+# Agent tests
+cd agents
+python -m pytest tests/ -v
 ```
 
 ### Environment Variables

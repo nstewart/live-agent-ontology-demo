@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # LLM
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    model_name: str = "gpt-4-turbo-preview"
+    llm_model: str = "gpt-4-turbo-preview"
 
     # Logging
     log_level: str = "INFO"

@@ -20,4 +20,4 @@ USER appuser
 
 EXPOSE 8081
 
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "src.main", "serve"]

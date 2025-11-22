@@ -99,5 +99,73 @@ def check():
     console.print(f"Materialize: {settings.mz_host}:{settings.mz_port}")
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Host to bind to"),
+    port: int = typer.Option(8081, help="Port to bind to"),
+):
+    """
+    Run the agent as a simple HTTP service.
+
+    POST /chat with JSON {"message": "your question"} to interact with the assistant.
+    """
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import json
+
+    class AgentHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/health":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "healthy"}).encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def do_POST(self):
+            if self.path == "/chat":
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                try:
+                    data = json.loads(body)
+                    message = data.get("message", "")
+                    if not message:
+                        self.send_response(400)
+                        self.send_header("Content-type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"error": "message required"}).encode())
+                        return
+
+                    response = asyncio.run(run_assistant(message))
+                    self.send_response(200)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"response": response}).encode())
+
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": str(e)}).encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+
+        def log_message(self, format, *args):
+            logging.info("%s - %s", self.address_string(), format % args)
+
+    console.print(f"[bold green]Starting agent server on {host}:{port}[/bold green]")
+    console.print("POST /chat with {\"message\": \"your question\"}")
+    console.print("GET /health for health check")
+
+    server = HTTPServer((host, port), AgentHandler)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Shutting down...[/yellow]")
+        server.shutdown()
+
+
 if __name__ == "__main__":
     app()

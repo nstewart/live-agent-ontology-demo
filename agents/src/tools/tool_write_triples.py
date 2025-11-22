@@ -11,7 +11,7 @@ from src.config import get_settings
 @tool
 async def write_triples(
     triples: list[dict],
-    validate: bool = True,
+    validate_ontology: bool = True,
 ) -> list[dict]:
     """
     Write one or more triples to the FreshMart knowledge graph.
@@ -29,7 +29,7 @@ async def write_triples(
 
     Args:
         triples: List of triples to create/update
-        validate: Whether to validate against ontology (default True)
+        validate_ontology: Whether to validate against ontology (default True)
 
     Returns:
         List of created/updated triples or error details
@@ -62,7 +62,7 @@ async def write_triples(
                 response = await client.post(
                     f"{settings.agent_api_base}/triples",
                     json=triple,
-                    params={"validate": validate},
+                    params={"validate": validate_ontology},
                     timeout=10.0,
                 )
 

@@ -12,6 +12,8 @@ import pytest
 KNOWN_CONFLICTS = [
     (r"pytest==8\.", r"pytest-asyncio==0\.23\."),
     (r"pytest>=8", r"pytest-asyncio==0\.23\."),
+    # langgraph 0.0.x requires langchain-core >=0.2
+    (r"langgraph==0\.0\.", r"langchain-core==0\.1\."),
 ]
 
 
