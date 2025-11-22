@@ -67,6 +67,17 @@ export function groupOrdersByStatus(
 }
 
 /**
+ * Format a currency amount for display.
+ * Handles both string and number inputs (API may return decimals as strings).
+ */
+export function formatAmount(amount: string | number | null | undefined): string {
+  if (amount == null) return '0.00'
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount
+  if (isNaN(num)) return '0.00'
+  return num.toFixed(2)
+}
+
+/**
  * Calculate order totals by status.
  */
 export function calculateOrderTotalsByStatus(
@@ -76,7 +87,12 @@ export function calculateOrderTotalsByStatus(
   return Object.entries(grouped).reduce(
     (acc, [status, statusOrders]) => {
       acc[status] = statusOrders.reduce(
-        (sum, o) => sum + (o.order_total_amount || 0),
+        (sum, o) => {
+          // Handle both string and number amounts from API
+          const amount = o.order_total_amount
+          const numAmount = typeof amount === 'string' ? parseFloat(amount) : (amount || 0)
+          return sum + (isNaN(numAmount) ? 0 : numAmount)
+        },
         0
       )
       return acc

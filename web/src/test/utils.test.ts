@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   formatDate,
+  formatAmount,
   getStatusColor,
   extractPrefix,
   filterPropertiesByClass,
@@ -99,6 +100,30 @@ describe('groupOrdersByStatus', () => {
   })
 })
 
+describe('formatAmount', () => {
+  it('formats number amounts', () => {
+    expect(formatAmount(45.99)).toBe('45.99')
+    expect(formatAmount(100)).toBe('100.00')
+  })
+
+  it('formats string amounts (API may return decimals as strings)', () => {
+    // This test would have caught the toFixed bug!
+    expect(formatAmount('45.99')).toBe('45.99')
+    expect(formatAmount('100')).toBe('100.00')
+    expect(formatAmount('32.5')).toBe('32.50')
+  })
+
+  it('handles null and undefined', () => {
+    expect(formatAmount(null)).toBe('0.00')
+    expect(formatAmount(undefined)).toBe('0.00')
+  })
+
+  it('handles invalid strings', () => {
+    expect(formatAmount('invalid')).toBe('0.00')
+    expect(formatAmount('')).toBe('0.00')
+  })
+})
+
 describe('calculateOrderTotalsByStatus', () => {
   it('calculates totals for each status', () => {
     const totals = calculateOrderTotalsByStatus(mockOrders)
@@ -112,6 +137,17 @@ describe('calculateOrderTotalsByStatus', () => {
     ]
     const totals = calculateOrderTotalsByStatus(orders)
     expect(totals['OUT_FOR_DELIVERY']).toBe(0)
+  })
+
+  it('handles orders with string amounts (API returns decimals as strings)', () => {
+    // This test would have caught the toFixed bug!
+    const orders = [
+      { ...mockOrders[0], order_total_amount: '45.99' as unknown as number },
+      { ...mockOrders[1], order_total_amount: '32.50' as unknown as number },
+    ]
+    const totals = calculateOrderTotalsByStatus(orders)
+    expect(totals['OUT_FOR_DELIVERY']).toBe(45.99)
+    expect(totals['DELIVERED']).toBe(32.5)
   })
 
   it('returns empty object for empty array', () => {

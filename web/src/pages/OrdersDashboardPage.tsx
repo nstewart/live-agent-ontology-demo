@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { freshmartApi, OrderFlat } from '../api/client'
+import { formatAmount } from '../test/utils'
 import { Package, Clock, CheckCircle, XCircle, Truck } from 'lucide-react'
 
 const statusConfig: Record<string, { color: string; icon: typeof Package }> = {
@@ -40,7 +41,7 @@ function OrderCard({ order }: { order: OrderFlat }) {
           {order.delivery_window_start?.slice(11, 16)} - {order.delivery_window_end?.slice(11, 16)}
         </p>
         <p className="text-gray-900 font-medium">
-          ${order.order_total_amount?.toFixed(2)}
+          ${formatAmount(order.order_total_amount)}
         </p>
       </div>
     </div>
