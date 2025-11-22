@@ -1,0 +1,465 @@
+"""Tests for agent tools."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import httpx
+
+
+class TestSearchOrders:
+    """Tests for search_orders tool."""
+
+    @pytest.mark.asyncio
+    async def test_returns_matching_orders(self, mock_settings, sample_search_response):
+        """Returns orders matching search query."""
+        with patch("src.tools.tool_search_orders.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = sample_search_response
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_orders import search_orders
+
+                # Call the underlying function directly
+                results = await search_orders.ainvoke({"query": "Alex"})
+
+                assert len(results) == 2
+                assert results[0]["order_id"] == "order:FM-1001"
+                assert results[0]["customer_name"] == "Alex Thompson"
+
+    @pytest.mark.asyncio
+    async def test_includes_status_filter(self, mock_settings):
+        """Includes status filter in OpenSearch query."""
+        with patch("src.tools.tool_search_orders.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = {"hits": {"hits": []}}
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_orders import search_orders
+
+                await search_orders.ainvoke({
+                    "query": "Alex",
+                    "status": "OUT_FOR_DELIVERY"
+                })
+
+                # Check the posted query body
+                call_args = mock_client.post.call_args
+                query_body = call_args.kwargs["json"]
+                must_clauses = query_body["query"]["bool"]["must"]
+                assert any(
+                    clause.get("term", {}).get("order_status") == "OUT_FOR_DELIVERY"
+                    for clause in must_clauses
+                )
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Returns error message on HTTP error."""
+        with patch("src.tools.tool_search_orders.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_orders import search_orders
+
+                results = await search_orders.ainvoke({"query": "Alex"})
+
+                assert len(results) == 1
+                assert "error" in results[0]
+
+    @pytest.mark.asyncio
+    async def test_respects_limit_parameter(self, mock_settings):
+        """Respects limit parameter in query."""
+        with patch("src.tools.tool_search_orders.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = {"hits": {"hits": []}}
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_orders import search_orders
+
+                await search_orders.ainvoke({"query": "Alex", "limit": 5})
+
+                call_args = mock_client.post.call_args
+                query_body = call_args.kwargs["json"]
+                assert query_body["size"] == 5
+
+
+class TestFetchOrderContext:
+    """Tests for fetch_order_context tool."""
+
+    @pytest.mark.asyncio
+    async def test_fetches_single_order(self, mock_settings, sample_order_detail):
+        """Fetches details for single order."""
+        with patch("src.tools.tool_fetch_order_context.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = sample_order_detail
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_fetch_order_context import fetch_order_context
+
+                results = await fetch_order_context.ainvoke({
+                    "order_ids": ["order:FM-1001"]
+                })
+
+                assert len(results) == 1
+                assert results[0]["order_id"] == "order:FM-1001"
+
+    @pytest.mark.asyncio
+    async def test_fetches_multiple_orders(self, mock_settings, sample_order_detail):
+        """Fetches details for multiple orders."""
+        with patch("src.tools.tool_fetch_order_context.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = sample_order_detail
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_fetch_order_context import fetch_order_context
+
+                results = await fetch_order_context.ainvoke({
+                    "order_ids": ["order:FM-1001", "order:FM-1002"]
+                })
+
+                assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_handles_not_found(self, mock_settings):
+        """Handles 404 not found response."""
+        with patch("src.tools.tool_fetch_order_context.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 404
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_fetch_order_context import fetch_order_context
+
+                results = await fetch_order_context.ainvoke({
+                    "order_ids": ["order:NONEXISTENT"]
+                })
+
+                assert len(results) == 1
+                assert "error" in results[0]
+                assert "not found" in results[0]["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Handles HTTP connection errors."""
+        with patch("src.tools.tool_fetch_order_context.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_fetch_order_context import fetch_order_context
+
+                results = await fetch_order_context.ainvoke({
+                    "order_ids": ["order:FM-1001"]
+                })
+
+                assert len(results) == 1
+                assert "error" in results[0]
+
+
+class TestGetOntology:
+    """Tests for get_ontology tool."""
+
+    @pytest.mark.asyncio
+    async def test_returns_simplified_schema(self, mock_settings, sample_ontology_schema):
+        """Returns simplified ontology schema."""
+        with patch("src.tools.tool_get_ontology.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = sample_ontology_schema
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_get_ontology import get_ontology
+
+                result = await get_ontology.ainvoke({})
+
+                assert "classes" in result
+                assert "properties" in result
+                assert len(result["classes"]) == 3
+                assert result["classes"][0]["class_name"] == "Customer"
+
+    @pytest.mark.asyncio
+    async def test_simplifies_property_format(self, mock_settings, sample_ontology_schema):
+        """Simplifies property format for agent."""
+        with patch("src.tools.tool_get_ontology.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = sample_ontology_schema
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_get_ontology import get_ontology
+
+                result = await get_ontology.ainvoke({})
+
+                # Check property format is simplified
+                customer_name_prop = next(
+                    p for p in result["properties"] if p["prop_name"] == "customer_name"
+                )
+                assert "domain" in customer_name_prop
+                assert "range" in customer_name_prop
+                assert "required" in customer_name_prop
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Returns error on HTTP failure."""
+        with patch("src.tools.tool_get_ontology.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_get_ontology import get_ontology
+
+                result = await get_ontology.ainvoke({})
+
+                assert "error" in result
+
+
+class TestWriteTriples:
+    """Tests for write_triples tool."""
+
+    @pytest.mark.asyncio
+    async def test_writes_single_triple(self, mock_settings, sample_created_triple):
+        """Writes single triple successfully."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = sample_created_triple
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                results = await write_triples.ainvoke({
+                    "triples": [{
+                        "subject_id": "order:FM-1001",
+                        "predicate": "order_status",
+                        "object_value": "DELIVERED",
+                        "object_type": "string",
+                    }]
+                })
+
+                assert len(results) == 1
+                assert results[0]["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_validates_required_fields(self, mock_settings):
+        """Validates required fields in triple."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                # Missing required fields
+                results = await write_triples.ainvoke({
+                    "triples": [{
+                        "subject_id": "order:FM-1001",
+                        # Missing predicate, object_value, object_type
+                    }]
+                })
+
+                assert len(results) == 1
+                assert "error" in results[0]
+                assert "Missing required fields" in results[0]["error"]
+
+    @pytest.mark.asyncio
+    async def test_handles_validation_failure(self, mock_settings):
+        """Handles API validation failure."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 400
+                mock_response.json.return_value = {
+                    "detail": {
+                        "errors": [{"error_type": "domain_violation", "message": "Wrong domain"}]
+                    }
+                }
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                results = await write_triples.ainvoke({
+                    "triples": [{
+                        "subject_id": "order:FM-1001",
+                        "predicate": "customer_name",  # Wrong domain
+                        "object_value": "John",
+                        "object_type": "string",
+                    }]
+                })
+
+                assert len(results) == 1
+                assert results[0]["success"] is False
+                assert results[0]["error"] == "Validation failed"
+
+    @pytest.mark.asyncio
+    async def test_writes_multiple_triples(self, mock_settings, sample_created_triple):
+        """Writes multiple triples."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = sample_created_triple
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                results = await write_triples.ainvoke({
+                    "triples": [
+                        {
+                            "subject_id": "order:FM-1001",
+                            "predicate": "order_status",
+                            "object_value": "DELIVERED",
+                            "object_type": "string",
+                        },
+                        {
+                            "subject_id": "order:FM-1002",
+                            "predicate": "order_status",
+                            "object_value": "DELIVERED",
+                            "object_type": "string",
+                        },
+                    ]
+                })
+
+                assert len(results) == 2
+                assert all(r["success"] for r in results)
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Handles HTTP connection errors."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                results = await write_triples.ainvoke({
+                    "triples": [{
+                        "subject_id": "order:FM-1001",
+                        "predicate": "order_status",
+                        "object_value": "DELIVERED",
+                        "object_type": "string",
+                    }]
+                })
+
+                assert len(results) == 1
+                assert results[0]["success"] is False
+                assert "error" in results[0]
+
+    @pytest.mark.asyncio
+    async def test_passes_validate_param(self, mock_settings, sample_created_triple):
+        """Passes validate parameter to API."""
+        with patch("src.tools.tool_write_triples.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.json.return_value = sample_created_triple
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_write_triples import write_triples
+
+                await write_triples.ainvoke({
+                    "triples": [{
+                        "subject_id": "test:123",
+                        "predicate": "any_prop",
+                        "object_value": "Value",
+                        "object_type": "string",
+                    }],
+                    "validate": False,
+                })
+
+                call_args = mock_client.post.call_args
+                assert call_args.kwargs["params"]["validate"] is False
