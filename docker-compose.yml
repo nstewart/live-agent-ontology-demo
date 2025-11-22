@@ -1,0 +1,172 @@
+version: "3.9"
+
+services:
+  # ============== Data Stores ==============
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
+      POSTGRES_DB: ${PG_DATABASE:-freshmart}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      - ./db/seed:/docker-entrypoint-initdb.d/seed:ro
+      - ./db/scripts/init-db.sh:/docker-entrypoint-initdb.d/00-init-db.sh:ro
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${PG_DATABASE:-freshmart}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Materialize Emulator (PostgreSQL with materialized views)
+  mz:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${MZ_USER:-materialize}
+      POSTGRES_PASSWORD: ${MZ_PASSWORD:-materialize}
+      POSTGRES_DB: ${MZ_DATABASE:-materialize}
+    volumes:
+      - materialize_data:/var/lib/postgresql/data
+      - ./db/materialize:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${MZ_PORT:-6875}:5432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MZ_USER:-materialize} -d ${MZ_DATABASE:-materialize}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "${OS_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qE 'green|yellow'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ============== Application Services ==============
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    environment:
+      - PG_HOST=${PG_HOST:-db}
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-postgres}
+      - PG_PASSWORD=${PG_PASSWORD:-postgres}
+      - PG_DATABASE=${PG_DATABASE:-freshmart}
+      - PG_EXTERNAL_URL=${PG_EXTERNAL_URL:-}
+      - MZ_HOST=${MZ_HOST:-mz}
+      - MZ_PORT=5432
+      - MZ_USER=${MZ_USER:-materialize}
+      - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
+      - MZ_DATABASE=${MZ_DATABASE:-materialize}
+      - MZ_EXTERNAL_URL=${MZ_EXTERNAL_URL:-}
+      - OS_HOST=${OS_HOST:-opensearch}
+      - OS_PORT=9200
+      - OS_USER=${OS_USER:-}
+      - OS_PASSWORD=${OS_PASSWORD:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      mz:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./api:/app:cached
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8080 --reload
+
+  search-sync:
+    build:
+      context: ./search-sync
+      dockerfile: Dockerfile
+    environment:
+      - MZ_HOST=${MZ_HOST:-mz}
+      - MZ_PORT=5432
+      - MZ_USER=${MZ_USER:-materialize}
+      - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
+      - MZ_DATABASE=${MZ_DATABASE:-materialize}
+      - MZ_EXTERNAL_URL=${MZ_EXTERNAL_URL:-}
+      - OS_HOST=${OS_HOST:-opensearch}
+      - OS_PORT=9200
+      - OS_USER=${OS_USER:-}
+      - OS_PASSWORD=${OS_PASSWORD:-}
+      - POLL_INTERVAL=${SYNC_POLL_INTERVAL:-5}
+      - BATCH_SIZE=${SYNC_BATCH_SIZE:-100}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      mz:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./search-sync:/app:cached
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    environment:
+      - VITE_API_URL=http://localhost:${API_PORT:-8080}
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./web:/app:cached
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  # ============== Agent Service (Optional Profile) ==============
+  agents:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    environment:
+      - AGENT_API_BASE=http://api:8080
+      - MZ_HOST=${MZ_HOST:-mz}
+      - MZ_PORT=5432
+      - MZ_USER=${MZ_USER:-materialize}
+      - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
+      - MZ_DATABASE=${MZ_DATABASE:-materialize}
+      - AGENT_OS_BASE=http://opensearch:9200
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    ports:
+      - "${AGENT_PORT:-8081}:8081"
+    depends_on:
+      - api
+      - opensearch
+    profiles:
+      - agent
+    volumes:
+      - ./agents:/app:cached
+
+volumes:
+  postgres_data:
+  materialize_data:
+  opensearch_data:

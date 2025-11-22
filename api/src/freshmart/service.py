@@ -1,0 +1,330 @@
+"""FreshMart service for operational queries."""
+
+import json
+from typing import Optional
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.freshmart.models import (
+    CourierSchedule,
+    OrderFilter,
+    OrderFlat,
+    StoreInfo,
+    StoreInventory,
+)
+
+
+class FreshMartService:
+    """Service for FreshMart operational queries using flattened views."""
+
+    def __init__(self, session: AsyncSession, use_materialize: bool = False):
+        """
+        Initialize service.
+
+        Args:
+            session: Database session (can be PG or MZ)
+            use_materialize: If True, queries Materialize views. If False, uses PG views.
+        """
+        self.session = session
+        self.use_materialize = use_materialize
+
+    def _view_suffix(self) -> str:
+        """Get view suffix based on database."""
+        return "_mz" if self.use_materialize else ""
+
+    # =========================================================================
+    # Orders
+    # =========================================================================
+
+    async def list_orders(
+        self,
+        filter_: Optional[OrderFilter] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[OrderFlat]:
+        """List orders with optional filtering."""
+        view = f"orders_flat{self._view_suffix()}"
+
+        conditions = []
+        params: dict = {"limit": limit, "offset": offset}
+
+        if filter_:
+            if filter_.status:
+                conditions.append("order_status = :status")
+                params["status"] = filter_.status
+            if filter_.store_id:
+                conditions.append("store_id = :store_id")
+                params["store_id"] = filter_.store_id
+            if filter_.customer_id:
+                conditions.append("customer_id = :customer_id")
+                params["customer_id"] = filter_.customer_id
+            if filter_.window_start_before:
+                conditions.append("delivery_window_start::timestamptz < :window_start_before")
+                params["window_start_before"] = filter_.window_start_before
+            if filter_.window_end_after:
+                conditions.append("delivery_window_end::timestamptz > :window_end_after")
+                params["window_end_after"] = filter_.window_end_after
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT order_id, order_number, order_status, store_id, customer_id,
+                   delivery_window_start, delivery_window_end, order_total_amount,
+                   effective_updated_at
+            FROM {view}
+            {where_clause}
+            ORDER BY effective_updated_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            OrderFlat(
+                order_id=row.order_id,
+                order_number=row.order_number,
+                order_status=row.order_status,
+                store_id=row.store_id,
+                customer_id=row.customer_id,
+                delivery_window_start=row.delivery_window_start,
+                delivery_window_end=row.delivery_window_end,
+                order_total_amount=row.order_total_amount,
+                effective_updated_at=row.effective_updated_at,
+            )
+            for row in rows
+        ]
+
+    async def get_order(self, order_id: str) -> Optional[OrderFlat]:
+        """Get detailed order information."""
+        # Use the search source view for enriched data
+        view = f"orders_search_source" if self.use_materialize else "orders_search_source"
+
+        result = await self.session.execute(
+            text(f"""
+                SELECT order_id, order_number, order_status, store_id, customer_id,
+                       delivery_window_start, delivery_window_end, order_total_amount,
+                       customer_name, customer_email, customer_address,
+                       store_name, store_zone, store_address,
+                       assigned_courier_id, delivery_task_status, delivery_eta,
+                       effective_updated_at
+                FROM {view}
+                WHERE order_id = :order_id
+            """),
+            {"order_id": order_id},
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return OrderFlat(
+            order_id=row.order_id,
+            order_number=row.order_number,
+            order_status=row.order_status,
+            store_id=row.store_id,
+            customer_id=row.customer_id,
+            delivery_window_start=row.delivery_window_start,
+            delivery_window_end=row.delivery_window_end,
+            order_total_amount=row.order_total_amount,
+            customer_name=row.customer_name,
+            customer_email=row.customer_email,
+            customer_address=row.customer_address,
+            store_name=row.store_name,
+            store_zone=row.store_zone,
+            store_address=row.store_address,
+            assigned_courier_id=row.assigned_courier_id,
+            delivery_task_status=row.delivery_task_status,
+            delivery_eta=row.delivery_eta,
+            effective_updated_at=row.effective_updated_at,
+        )
+
+    # =========================================================================
+    # Inventory
+    # =========================================================================
+
+    async def list_store_inventory(
+        self,
+        store_id: Optional[str] = None,
+        low_stock_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[StoreInventory]:
+        """List store inventory, optionally filtered by store."""
+        view = f"store_inventory_flat{self._view_suffix()}"
+
+        conditions = []
+        params: dict = {"limit": limit, "offset": offset}
+
+        if store_id:
+            conditions.append("store_id = :store_id")
+            params["store_id"] = store_id
+        if low_stock_only:
+            conditions.append("stock_level < 10")
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT inventory_id, store_id, product_id, stock_level,
+                   replenishment_eta, effective_updated_at
+            FROM {view}
+            {where_clause}
+            ORDER BY store_id, product_id
+            LIMIT :limit OFFSET :offset
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            StoreInventory(
+                inventory_id=row.inventory_id,
+                store_id=row.store_id,
+                product_id=row.product_id,
+                stock_level=row.stock_level,
+                replenishment_eta=row.replenishment_eta,
+                effective_updated_at=row.effective_updated_at,
+            )
+            for row in rows
+        ]
+
+    async def get_store(self, store_id: str) -> Optional[StoreInfo]:
+        """Get store information with inventory."""
+        # Get store details from triples
+        result = await self.session.execute(
+            text("""
+                SELECT
+                    MAX(CASE WHEN predicate = 'store_name' THEN object_value END) AS store_name,
+                    MAX(CASE WHEN predicate = 'store_address' THEN object_value END) AS store_address,
+                    MAX(CASE WHEN predicate = 'store_zone' THEN object_value END) AS store_zone,
+                    MAX(CASE WHEN predicate = 'store_status' THEN object_value END) AS store_status,
+                    MAX(CASE WHEN predicate = 'store_capacity_orders_per_hour' THEN object_value END)::INT AS capacity
+                FROM triples
+                WHERE subject_id = :store_id
+            """),
+            {"store_id": store_id},
+        )
+        row = result.fetchone()
+
+        if not row or not row.store_name:
+            return None
+
+        # Get inventory
+        inventory = await self.list_store_inventory(store_id=store_id, limit=1000)
+
+        return StoreInfo(
+            store_id=store_id,
+            store_name=row.store_name,
+            store_address=row.store_address,
+            store_zone=row.store_zone,
+            store_status=row.store_status,
+            store_capacity_orders_per_hour=row.capacity,
+            inventory_items=inventory,
+        )
+
+    async def list_stores(self) -> list[StoreInfo]:
+        """List all stores."""
+        result = await self.session.execute(
+            text("""
+                SELECT DISTINCT subject_id
+                FROM triples
+                WHERE subject_id LIKE 'store:%'
+            """)
+        )
+        rows = result.fetchall()
+
+        stores = []
+        for row in rows:
+            store = await self.get_store(row.subject_id)
+            if store:
+                stores.append(store)
+
+        return stores
+
+    # =========================================================================
+    # Couriers
+    # =========================================================================
+
+    async def list_courier_schedules(
+        self,
+        status: Optional[str] = None,
+        store_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[CourierSchedule]:
+        """List courier schedules."""
+        view = f"courier_schedule_flat{self._view_suffix()}"
+
+        conditions = []
+        params: dict = {"limit": limit, "offset": offset}
+
+        if status:
+            conditions.append("courier_status = :status")
+            params["status"] = status
+        if store_id:
+            conditions.append("home_store_id = :store_id")
+            params["store_id"] = store_id
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT courier_id, courier_name, home_store_id, vehicle_type,
+                   courier_status, tasks, effective_updated_at
+            FROM {view}
+            {where_clause}
+            ORDER BY courier_name
+            LIMIT :limit OFFSET :offset
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        schedules = []
+        for row in rows:
+            # Parse tasks JSON
+            tasks = row.tasks if isinstance(row.tasks, list) else json.loads(row.tasks) if row.tasks else []
+
+            schedules.append(
+                CourierSchedule(
+                    courier_id=row.courier_id,
+                    courier_name=row.courier_name,
+                    home_store_id=row.home_store_id,
+                    vehicle_type=row.vehicle_type,
+                    courier_status=row.courier_status,
+                    tasks=tasks,
+                    effective_updated_at=row.effective_updated_at,
+                )
+            )
+
+        return schedules
+
+    async def get_courier(self, courier_id: str) -> Optional[CourierSchedule]:
+        """Get courier with schedule."""
+        view = f"courier_schedule_flat{self._view_suffix()}"
+
+        result = await self.session.execute(
+            text(f"""
+                SELECT courier_id, courier_name, home_store_id, vehicle_type,
+                       courier_status, tasks, effective_updated_at
+                FROM {view}
+                WHERE courier_id = :courier_id
+            """),
+            {"courier_id": courier_id},
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        tasks = row.tasks if isinstance(row.tasks, list) else json.loads(row.tasks) if row.tasks else []
+
+        return CourierSchedule(
+            courier_id=row.courier_id,
+            courier_name=row.courier_name,
+            home_store_id=row.home_store_id,
+            vehicle_type=row.vehicle_type,
+            courier_status=row.courier_status,
+            tasks=tasks,
+            effective_updated_at=row.effective_updated_at,
+        )

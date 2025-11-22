@@ -1,0 +1,103 @@
+"""Agent CLI - Main entry point."""
+
+import asyncio
+import logging
+import sys
+
+import typer
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+
+from src.config import get_settings
+from src.graphs.ops_assistant_graph import run_assistant
+
+# Configure logging
+settings = get_settings()
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper()),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+app = typer.Typer(help="FreshMart Operations Assistant CLI")
+console = Console()
+
+
+@app.command()
+def chat(message: str = typer.Argument(None, help="Message to send to the assistant")):
+    """
+    Chat with the FreshMart Operations Assistant.
+
+    Examples:
+        python -m src.main "Show all OUT_FOR_DELIVERY orders"
+        python -m src.main "Find orders for customer Alex"
+        python -m src.main "Mark order FM-1001 as DELIVERED"
+    """
+    if not message:
+        # Interactive mode
+        console.print(Panel.fit(
+            "[bold green]FreshMart Operations Assistant[/bold green]\n"
+            "Type your questions about orders, stores, and couriers.\n"
+            "Type 'quit' or 'exit' to leave.",
+            title="Welcome",
+        ))
+
+        while True:
+            try:
+                user_input = console.input("\n[bold blue]You:[/bold blue] ")
+                if user_input.lower() in ("quit", "exit", "q"):
+                    console.print("[yellow]Goodbye![/yellow]")
+                    break
+
+                if not user_input.strip():
+                    continue
+
+                with console.status("[bold green]Thinking..."):
+                    response = asyncio.run(run_assistant(user_input))
+
+                console.print("\n[bold green]Assistant:[/bold green]")
+                console.print(Markdown(response))
+
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Goodbye![/yellow]")
+                break
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+    else:
+        # Single message mode
+        try:
+            with console.status("[bold green]Processing..."):
+                response = asyncio.run(run_assistant(message))
+
+            console.print(Panel(Markdown(response), title="Response"))
+
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+            sys.exit(1)
+
+
+@app.command()
+def check():
+    """Check agent configuration and connectivity."""
+    console.print("[bold]Checking agent configuration...[/bold]\n")
+
+    settings = get_settings()
+
+    # Check LLM
+    console.print("LLM Configuration:")
+    if settings.anthropic_api_key:
+        console.print("  [green]Anthropic API key configured[/green]")
+    elif settings.openai_api_key:
+        console.print("  [green]OpenAI API key configured[/green]")
+    else:
+        console.print("  [red]No LLM API key found![/red]")
+        console.print("  Set ANTHROPIC_API_KEY or OPENAI_API_KEY")
+
+    # Check API
+    console.print(f"\nAPI Base: {settings.agent_api_base}")
+    console.print(f"OpenSearch: {settings.agent_os_base}")
+    console.print(f"Materialize: {settings.mz_host}:{settings.mz_port}")
+
+
+if __name__ == "__main__":
+    app()
