@@ -6,6 +6,11 @@ services:
       POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
       POSTGRES_DB: ${PG_DATABASE:-freshmart}
+    command: >
+      postgres
+      -c wal_level=logical
+      -c max_replication_slots=10
+      -c max_wal_senders=10
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d/migrations:ro
@@ -19,26 +24,23 @@ services:
       timeout: 5s
       retries: 5
 
-  # Materialize Emulator (PostgreSQL with materialized views)
+  # Materialize Emulator (Real Materialize with admin console)
   mz:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ${MZ_USER:-materialize}
-      POSTGRES_PASSWORD: ${MZ_PASSWORD:-materialize}
-      POSTGRES_DB: ${MZ_DATABASE:-materialize}
-    volumes:
-      - materialize_data:/var/lib/postgresql/data
-      - ./db/materialize:/docker-entrypoint-initdb.d:ro
+    image: materialize/materialized:v26.0.0
     ports:
-      - "${MZ_PORT:-6875}:5432"
+      - "${MZ_CONSOLE_PORT:-6874}:6874"  # Admin Console
+      - "${MZ_PORT:-6875}:6875"          # SQL interface
+      - "6876:6876"
+      - "6877:6877"
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MZ_USER:-materialize} -d ${MZ_DATABASE:-materialize}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "curl", "-sf", "http://localhost:6874/"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
 
   opensearch:
     image: opensearchproject/opensearch:2.11.0
@@ -69,7 +71,7 @@ services:
       - PG_DATABASE=${PG_DATABASE:-freshmart}
       - PG_EXTERNAL_URL=${PG_EXTERNAL_URL:-}
       - MZ_HOST=${MZ_HOST:-mz}
-      - MZ_PORT=5432
+      - MZ_PORT=6875
       - MZ_USER=${MZ_USER:-materialize}
       - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
       - MZ_DATABASE=${MZ_DATABASE:-materialize}
@@ -103,7 +105,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - MZ_HOST=${MZ_HOST:-mz}
-      - MZ_PORT=5432
+      - MZ_PORT=6875
       - MZ_USER=${MZ_USER:-materialize}
       - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
       - MZ_DATABASE=${MZ_DATABASE:-materialize}
@@ -147,7 +149,7 @@ services:
     environment:
       - AGENT_API_BASE=http://api:8080
       - MZ_HOST=${MZ_HOST:-mz}
-      - MZ_PORT=5432
+      - MZ_PORT=6875
       - MZ_USER=${MZ_USER:-materialize}
       - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
       - MZ_DATABASE=${MZ_DATABASE:-materialize}
@@ -166,5 +168,4 @@ services:
 
 volumes:
   postgres_data:
-  materialize_data:
   opensearch_data:

@@ -80,7 +80,8 @@ The system will automatically:
 | Service | Port | Description |
 |---------|------|-------------|
 | **db** | 5432 | PostgreSQL - primary triple store |
-| **mz** | 6875 | Materialize emulator (PostgreSQL) |
+| **mz** | 6874 | Materialize Admin Console |
+| **mz** | 6875 | Materialize SQL interface |
 | **opensearch** | 9200 | Search engine for orders |
 | **api** | 8080 | FastAPI backend |
 | **search-sync** | - | Background worker syncing to OpenSearch |
