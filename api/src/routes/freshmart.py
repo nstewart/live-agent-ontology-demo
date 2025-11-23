@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.client import get_mz_session_factory
+from src.config import get_settings
+from src.db.client import get_mz_session_factory, get_pg_session_factory
 from src.freshmart.models import (
     CourierSchedule,
     OrderFilter,
@@ -21,21 +22,35 @@ router = APIRouter(prefix="/freshmart", tags=["FreshMart Operations"])
 
 
 async def get_session() -> AsyncSession:
-    """Dependency to get Materialize session with serving cluster."""
-    factory = get_mz_session_factory()
-    async with factory() as session:
-        try:
+    """Dependency to get database session for FreshMart queries.
+
+    Uses Materialize for reads in production (configurable via USE_MATERIALIZE_FOR_READS).
+    Falls back to PostgreSQL for testing or when Materialize is unavailable.
+    """
+    settings = get_settings()
+    use_mz = settings.use_materialize_for_reads
+
+    if use_mz:
+        factory = get_mz_session_factory()
+        async with factory() as session:
             # Use the serving cluster for low-latency indexed queries
             await session.execute(text("SET CLUSTER = serving"))
             yield session
-        except Exception:
-            await session.rollback()
-            raise
+    else:
+        factory = get_pg_session_factory()
+        async with factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
 
 async def get_freshmart_service(session: AsyncSession = Depends(get_session)) -> FreshMartService:
-    """Dependency to get FreshMart service configured for Materialize."""
-    return FreshMartService(session, use_materialize=True)
+    """Dependency to get FreshMart service."""
+    settings = get_settings()
+    return FreshMartService(session, use_materialize=settings.use_materialize_for_reads)
 
 
 # =============================================================================

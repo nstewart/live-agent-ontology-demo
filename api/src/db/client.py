@@ -84,13 +84,37 @@ def get_mz_engine():
     global _mz_engine
     if _mz_engine is None:
         settings = get_settings()
+
+        # Patch the asyncpg dialect to skip JSON codec setup for Materialize
+        from sqlalchemy.dialects.postgresql.asyncpg import PGDialect_asyncpg
+
+        original_setup_json = PGDialect_asyncpg.setup_asyncpg_json_codec
+        original_setup_jsonb = PGDialect_asyncpg.setup_asyncpg_jsonb_codec
+
+        async def noop_setup_json(self, conn):
+            pass
+
+        async def noop_setup_jsonb(self, conn):
+            pass
+
+        # Temporarily patch the dialect
+        PGDialect_asyncpg.setup_asyncpg_json_codec = noop_setup_json
+        PGDialect_asyncpg.setup_asyncpg_jsonb_codec = noop_setup_jsonb
+
         _mz_engine = create_async_engine(
             settings.mz_dsn,
             echo=settings.log_level == "DEBUG",
             pool_size=5,
             max_overflow=10,
+            connect_args={
+                # Disable asyncpg's prepared statement cache (Materialize compatibility)
+                "prepared_statement_cache_size": 0,
+            },
         )
         _setup_query_logging(_mz_engine, "Materialize")
+
+        # Note: We keep the patch in place since this engine will be used throughout
+        # the application lifetime. The PG engine is created separately so it won't be affected.
     return _mz_engine
 
 
@@ -114,6 +138,8 @@ def get_mz_session_factory() -> async_sessionmaker[AsyncSession]:
             get_mz_engine(),
             class_=AsyncSession,
             expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
         )
     return _mz_session_factory
 
@@ -136,11 +162,7 @@ async def get_mz_session() -> AsyncGenerator[AsyncSession, None]:
     """Get Materialize session context manager."""
     factory = get_mz_session_factory()
     async with factory() as session:
-        try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
+        yield session
 
 
 async def close_connections():

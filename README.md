@@ -322,32 +322,34 @@ docker-compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
 
 Filter by operation type:
 ```bash
-# Only show writes (should all be PostgreSQL)
+# Only show writes (go to PostgreSQL, then CDC to Materialize)
 docker-compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
 
-# Only show reads (should all be Materialize for UI queries)
+# Only show reads (all from Materialize serving cluster)
 docker-compose logs -f api | grep "\[SELECT\]"
 ```
 
 ### Materialize Three-Tier Architecture
 
-UI read queries hit Materialize's **serving cluster** for low-latency indexed access:
+All UI read queries are routed through Materialize's **serving cluster** for low-latency indexed access:
 
 ```
 UI → API → Materialize (serving cluster) → Indexed Materialized Views
 ```
 
 The architecture uses three clusters:
-- **ingest**: PostgreSQL source replication
+- **ingest**: PostgreSQL source replication via CDC
 - **compute**: Materialized view computation
 - **serving**: Indexes for low-latency queries
 
 To verify queries are hitting the serving cluster:
 ```bash
-# Check from Materialize console
-docker-compose exec mz psql -U materialize -c "SHOW CLUSTER;"
+# Watch query logs - should show [Materialize]
+docker-compose logs -f api | grep -E "\[Materialize\]"
 
-# Should show: serving (when queried from API)
+# Example output:
+# [Materialize] [SET] 0.68ms: SET CLUSTER = serving | params=()
+# [Materialize] [SELECT] 4.30ms: SELECT order_id, order_number... | params=(100, 0)
 ```
 
 ## Development
