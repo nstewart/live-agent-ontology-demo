@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { freshmartApi, triplesApi, CourierSchedule, TripleCreate } from '../api/client'
+import { freshmartApi, triplesApi, CourierSchedule, TripleCreate, StoreInfo } from '../api/client'
 import { Truck, Bike, Car, Coffee, Plus, Edit2, Trash2, X } from 'lucide-react'
 
 const vehicleIcons: Record<string, typeof Truck> = {
@@ -40,12 +40,14 @@ function CourierFormModal({
   courier,
   onSave,
   isLoading,
+  stores,
 }: {
   isOpen: boolean
   onClose: () => void
   courier?: CourierSchedule
   onSave: (data: CourierFormData, isEdit: boolean) => void
   isLoading: boolean
+  stores: StoreInfo[]
 }) {
   const [formData, setFormData] = useState<CourierFormData>(initialCourierForm)
 
@@ -138,15 +140,20 @@ function CourierFormModal({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Home Store ID *</label>
-              <input
-                type="text"
+              <label className="block text-sm font-medium text-gray-700 mb-1">Home Store *</label>
+              <select
                 required
                 value={formData.home_store_id}
                 onChange={e => setFormData({ ...formData, home_store_id: e.target.value })}
-                placeholder="store:BK-01"
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
+              >
+                <option value="">Select a store...</option>
+                {stores.map(store => (
+                  <option key={store.store_id} value={store.store_id}>
+                    {store.store_name || 'Unknown'} ({store.store_id})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-4">
@@ -178,13 +185,18 @@ export default function CouriersSchedulePage() {
     queryFn: () => freshmartApi.listCouriers().then(r => r.data),
   })
 
+  const { data: stores = [] } = useQuery({
+    queryKey: ['stores'],
+    queryFn: () => freshmartApi.listStores().then(r => r.data),
+  })
+
   const createCourierMutation = useMutation({
     mutationFn: async (data: CourierFormData) => {
       const courierId = `courier:${data.courier_id}`
       const triples: TripleCreate[] = [
         { subject_id: courierId, predicate: 'courier_name', object_value: data.courier_name, object_type: 'string' },
         { subject_id: courierId, predicate: 'vehicle_type', object_value: data.vehicle_type, object_type: 'string' },
-        { subject_id: courierId, predicate: 'home_store', object_value: data.home_store_id, object_type: 'entity_ref' },
+        { subject_id: courierId, predicate: 'courier_home_store', object_value: data.home_store_id, object_type: 'entity_ref' },
         { subject_id: courierId, predicate: 'courier_status', object_value: data.courier_status, object_type: 'string' },
       ]
       return triplesApi.createBatch(triples)
@@ -193,6 +205,10 @@ export default function CouriersSchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['couriers'] })
       setShowCourierModal(false)
       setEditingCourier(undefined)
+    },
+    onError: (error) => {
+      console.error('Failed to create courier:', error)
+      alert('Failed to create courier. Check the console for details.')
     },
   })
 
@@ -203,7 +219,7 @@ export default function CouriersSchedulePage() {
       const fields: { predicate: string; value: string; type: TripleCreate['object_type'] }[] = [
         { predicate: 'courier_name', value: data.courier_name, type: 'string' },
         { predicate: 'vehicle_type', value: data.vehicle_type, type: 'string' },
-        { predicate: 'home_store', value: data.home_store_id, type: 'entity_ref' },
+        { predicate: 'courier_home_store', value: data.home_store_id, type: 'entity_ref' },
         { predicate: 'courier_status', value: data.courier_status, type: 'string' },
       ]
       for (const field of fields) {
@@ -220,6 +236,10 @@ export default function CouriersSchedulePage() {
       queryClient.invalidateQueries({ queryKey: ['couriers'] })
       setShowCourierModal(false)
       setEditingCourier(undefined)
+    },
+    onError: (error) => {
+      console.error('Failed to update courier:', error)
+      alert('Failed to update courier. Check the console for details.')
     },
   })
 
@@ -272,6 +292,7 @@ export default function CouriersSchedulePage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {couriers.map(courier => {
             const VehicleIcon = vehicleIcons[courier.vehicle_type || ''] || Truck
+            const homeStore = stores.find(s => s.store_id === courier.home_store_id)
             return (
               <div key={courier.courier_id} className="bg-white rounded-lg shadow p-4">
                 <div className="flex items-start justify-between mb-4">
@@ -280,7 +301,7 @@ export default function CouriersSchedulePage() {
                       <VehicleIcon className="h-5 w-5 text-blue-600" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-gray-900">{courier.courier_name}</h3>
+                      <h3 className="font-semibold text-gray-900">{courier.courier_name} ({courier.courier_id.replace('courier:', '')})</h3>
                       <p className="text-sm text-gray-500">{courier.vehicle_type}</p>
                     </div>
                   </div>
@@ -311,7 +332,7 @@ export default function CouriersSchedulePage() {
                 </div>
 
                 <div className="text-sm text-gray-600 mb-4">
-                  <p>Home Store: {courier.home_store_id}</p>
+                  <p>Home Store: {homeStore ? `${homeStore.store_name} (${courier.home_store_id})` : courier.home_store_id || 'Not assigned'}</p>
                 </div>
 
                 {/* Tasks */}
@@ -366,6 +387,7 @@ export default function CouriersSchedulePage() {
         courier={editingCourier}
         onSave={handleSaveCourier}
         isLoading={createCourierMutation.isPending || updateCourierMutation.isPending}
+        stores={stores}
       />
 
       {deleteCourierConfirm && (

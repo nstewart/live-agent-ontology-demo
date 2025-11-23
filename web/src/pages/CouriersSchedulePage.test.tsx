@@ -8,6 +8,7 @@ import { mockCouriers, mockCourierSubjectInfo } from '../test/mocks'
 vi.mock('../api/client', () => ({
   freshmartApi: {
     listCouriers: vi.fn(),
+    listStores: vi.fn(),
   },
   triplesApi: {
     createBatch: vi.fn(),
@@ -19,6 +20,11 @@ vi.mock('../api/client', () => ({
 }))
 
 import { freshmartApi, triplesApi } from '../api/client'
+
+const mockStores = [
+  { store_id: 'store:BK-01', store_name: 'Brooklyn Heights', store_address: '123 Main St', store_zone: 'Brooklyn', store_status: 'ACTIVE', store_capacity_orders_per_hour: 50, inventory_items: [] },
+  { store_id: 'store:MH-01', store_name: 'Manhattan', store_address: '456 Broadway', store_zone: 'Manhattan', store_status: 'ACTIVE', store_capacity_orders_per_hour: 75, inventory_items: [] },
+]
 
 const createTestQueryClient = () =>
   new QueryClient({
@@ -39,6 +45,8 @@ const renderWithClient = (ui: React.ReactElement) => {
 describe('CouriersSchedulePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Default mock for stores
+    vi.mocked(freshmartApi.listStores).mockResolvedValue({ data: mockStores } as never)
   })
 
   describe('Rendering', () => {
@@ -53,9 +61,9 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
-      expect(screen.getByText('Sarah Davis')).toBeInTheDocument()
+      expect(screen.getByText(/Sarah Davis/)).toBeInTheDocument()
     })
 
     it('shows error state when API fails', async () => {
@@ -121,7 +129,7 @@ describe('CouriersSchedulePage', () => {
         expect(screen.getByText(/Courier ID/)).toBeInTheDocument()
         expect(screen.getByText(/Name/)).toBeInTheDocument()
         expect(screen.getByText(/Vehicle Type/)).toBeInTheDocument()
-        expect(screen.getByText(/Home Store ID/)).toBeInTheDocument()
+        expect(screen.getByText(/Home Store \*/)).toBeInTheDocument()
         expect(screen.getByText(/Status/)).toBeInTheDocument()
       })
     })
@@ -138,10 +146,18 @@ describe('CouriersSchedulePage', () => {
         expect(screen.getByText('Create Courier')).toBeInTheDocument()
       })
 
+      // Wait for stores dropdown to be populated
+      await waitFor(() => {
+        expect(screen.getByText('Brooklyn Heights (store:BK-01)')).toBeInTheDocument()
+      })
+
       // Fill out form using placeholders
       fireEvent.change(screen.getByPlaceholderText('CR-01'), { target: { value: 'CR-99' } })
       fireEvent.change(screen.getByPlaceholderText('John Smith'), { target: { value: 'Test Courier' } })
-      fireEvent.change(screen.getByPlaceholderText('store:BK-01'), { target: { value: 'store:TEST-01' } })
+
+      // Select home store from dropdown (3rd select: Status, Vehicle Type, Home Store)
+      const selects = screen.getAllByRole('combobox')
+      fireEvent.change(selects[2], { target: { value: 'store:BK-01' } })
 
       // Submit form
       const submitButtons = screen.getAllByRole('button')
@@ -166,9 +182,17 @@ describe('CouriersSchedulePage', () => {
         expect(screen.getByText('Create Courier')).toBeInTheDocument()
       })
 
+      // Wait for stores dropdown to be populated
+      await waitFor(() => {
+        expect(screen.getByText('Brooklyn Heights (store:BK-01)')).toBeInTheDocument()
+      })
+
       fireEvent.change(screen.getByPlaceholderText('CR-01'), { target: { value: 'CR-99' } })
       fireEvent.change(screen.getByPlaceholderText('John Smith'), { target: { value: 'Test Courier' } })
-      fireEvent.change(screen.getByPlaceholderText('store:BK-01'), { target: { value: 'store:TEST-01' } })
+
+      // Select home store from dropdown (3rd select: Status, Vehicle Type, Home Store)
+      const selects = screen.getAllByRole('combobox')
+      fireEvent.change(selects[2], { target: { value: 'store:BK-01' } })
 
       const submitButtons = screen.getAllByRole('button')
       const createButton = submitButtons.find(btn => btn.textContent === 'Create')
@@ -179,7 +203,7 @@ describe('CouriersSchedulePage', () => {
           expect.arrayContaining([
             expect.objectContaining({ subject_id: 'courier:CR-99', predicate: 'courier_name' }),
             expect.objectContaining({ subject_id: 'courier:CR-99', predicate: 'vehicle_type' }),
-            expect.objectContaining({ subject_id: 'courier:CR-99', predicate: 'home_store' }),
+            expect.objectContaining({ subject_id: 'courier:CR-99', predicate: 'courier_home_store' }),
             expect.objectContaining({ subject_id: 'courier:CR-99', predicate: 'courier_status' }),
           ])
         )
@@ -193,7 +217,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const editButtons = screen.getAllByTitle('Edit courier')
@@ -209,7 +233,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const editButtons = screen.getAllByTitle('Edit courier')
@@ -231,7 +255,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const editButtons = screen.getAllByTitle('Edit courier')
@@ -255,7 +279,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const deleteButtons = screen.getAllByTitle('Delete courier')
@@ -272,7 +296,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const deleteButtons = screen.getAllByTitle('Delete courier')
@@ -297,7 +321,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const deleteButtons = screen.getAllByTitle('Delete courier')
@@ -325,8 +349,8 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
-        expect(screen.getByText('Sarah Davis')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
+        expect(screen.getByText(/Sarah Davis/)).toBeInTheDocument()
       })
     })
 
@@ -345,8 +369,9 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText(/Home Store: store:BK-01/)).toBeInTheDocument()
-        expect(screen.getByText(/Home Store: store:MH-01/)).toBeInTheDocument()
+        // Home store now shows "Store Name (store:ID)" format
+        expect(screen.getByText(/Brooklyn Heights \(store:BK-01\)/)).toBeInTheDocument()
+        expect(screen.getByText(/Manhattan \(store:MH-01\)/)).toBeInTheDocument()
       })
     })
   })
@@ -388,7 +413,7 @@ describe('CouriersSchedulePage', () => {
       renderWithClient(<CouriersSchedulePage />)
 
       await waitFor(() => {
-        expect(screen.getByText('Mike Johnson')).toBeInTheDocument()
+        expect(screen.getByText(/Mike Johnson/)).toBeInTheDocument()
       })
 
       const editButtons = screen.getAllByTitle('Edit courier')

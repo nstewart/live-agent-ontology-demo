@@ -447,6 +447,32 @@ freshmart-digital-twin-agent-starter/
     └── AGENTS.md
 ```
 
+## Admin UI Features
+
+The React Admin UI (`web/`) provides CRUD operations for managing FreshMart entities:
+
+### Orders Dashboard
+- View all orders with status badges and filtering
+- Create new orders with dropdown selectors for:
+  - **Customer**: Format "Customer Name (customer:ID)"
+  - **Store**: Format "Store Name (store:ID)"
+- Edit existing orders with pre-populated form fields
+- Delete orders with confirmation dialog
+
+### Couriers & Schedule
+- View all couriers with their assigned tasks
+- Create new couriers with dropdown selector for:
+  - **Home Store**: Format "Store Name (store:ID)"
+- Edit courier details including status and vehicle type
+- Delete couriers with confirmation dialog
+
+### Stores Inventory
+- View stores with their current inventory levels
+- Create/edit stores with zone and capacity settings
+- Manage inventory items per store
+
+All dropdown data is fetched from Materialize's serving cluster for low-latency access.
+
 ## Acceptance Criteria
 
 From a clean checkout:
