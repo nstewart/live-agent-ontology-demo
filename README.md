@@ -499,7 +499,24 @@ MZ_EXTERNAL_URL=postgresql://user:pass@host:6875/materialize
 # LLM API keys for agents
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+
+# Feature flags
+USE_MATERIALIZE_FOR_READS=true  # Set to false to query PostgreSQL instead of Materialize
 ```
+
+#### Running Against PostgreSQL
+
+By default, FreshMart read queries (`/freshmart/*` endpoints) use Materialize's indexed materialized views for low-latency access. To query PostgreSQL directly instead:
+
+```bash
+# Set in .env or docker-compose.yml
+USE_MATERIALIZE_FOR_READS=false
+```
+
+This is useful for:
+- Development without Materialize
+- Debugging query differences
+- Environments where Materialize isn't available
 
 ### Extending the Ontology
 
