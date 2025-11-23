@@ -305,6 +305,8 @@ export default function StoresInventoryPage() {
   const [showInventoryModal, setShowInventoryModal] = useState(false)
   const [editingInventory, setEditingInventory] = useState<{ inventory?: StoreInventory; storeId: string } | null>(null)
   const [deleteInventoryConfirm, setDeleteInventoryConfirm] = useState<StoreInventory | null>(null)
+  const [expandedStores, setExpandedStores] = useState<Set<string>>(new Set())
+  const [viewAllInventoryStore, setViewAllInventoryStore] = useState<StoreInfo | null>(null)
 
   const { data: stores, isLoading, error } = useQuery({
     queryKey: ['stores'],
@@ -558,7 +560,7 @@ export default function StoresInventoryPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {store.inventory_items.map(item => (
+                        {store.inventory_items.slice(0, 5).map(item => (
                           <tr key={item.inventory_id} className="border-b last:border-0">
                             <td className="py-2 flex items-center gap-2">
                               <Package className="h-4 w-4 text-gray-400" />
@@ -596,6 +598,14 @@ export default function StoresInventoryPage() {
                         ))}
                       </tbody>
                     </table>
+                    {store.inventory_items.length > 5 && (
+                      <button
+                        onClick={() => setViewAllInventoryStore(store)}
+                        className="mt-3 w-full px-4 py-2 text-sm text-green-600 hover:text-green-700 hover:bg-green-50 rounded-lg border border-green-200 transition-colors"
+                      >
+                        View All {store.inventory_items.length} Items
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -670,6 +680,83 @@ export default function StoresInventoryPage() {
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
                 {deleteInventoryMutation.isPending ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewAllInventoryStore && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold">All Inventory Items</h2>
+                <p className="text-sm text-gray-600">{viewAllInventoryStore.store_name} - {viewAllInventoryStore.inventory_items.length} items</p>
+              </div>
+              <button
+                onClick={() => setViewAllInventoryStore(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-left text-gray-500 border-b">
+                    <th className="pb-2">Product</th>
+                    <th className="pb-2">Stock Level</th>
+                    <th className="pb-2">Replenishment ETA</th>
+                    <th className="pb-2 w-20">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {viewAllInventoryStore.inventory_items.map(item => (
+                    <tr key={item.inventory_id} className="border-b last:border-0">
+                      <td className="py-2 flex items-center gap-2">
+                        <Package className="h-4 w-4 text-gray-400" />
+                        {item.product_id}
+                      </td>
+                      <td className="py-2">
+                        <span className={`flex items-center gap-1 ${(item.stock_level || 0) < 10 ? 'text-red-600' : 'text-gray-900'}`}>
+                          {(item.stock_level || 0) < 10 && <AlertTriangle className="h-4 w-4" />}
+                          {item.stock_level}
+                        </span>
+                      </td>
+                      <td className="py-2 text-gray-500">{item.replenishment_eta || '-'}</td>
+                      <td className="py-2">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingInventory({ inventory: item, storeId: viewAllInventoryStore.store_id })
+                              setShowInventoryModal(true)
+                            }}
+                            className="p-1 text-gray-400 hover:text-blue-600"
+                            title="Edit"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteInventoryConfirm(item)}
+                            className="p-1 text-gray-400 hover:text-red-600"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="p-4 border-t">
+              <button
+                onClick={() => setViewAllInventoryStore(null)}
+                className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+              >
+                Close
               </button>
             </div>
           </div>
