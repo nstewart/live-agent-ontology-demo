@@ -187,6 +187,15 @@ export default function CouriersSchedulePage() {
     queryFn: () => freshmartApi.listCouriers().then(r => r.data),
   })
 
+  // Search for specific courier by ID (queries database directly)
+  const searchCourierId = courierIdSearch.includes(':') ? courierIdSearch : courierIdSearch ? `courier:${courierIdSearch}` : ''
+  const { data: searchedCourier } = useQuery({
+    queryKey: ['courier', searchCourierId],
+    queryFn: () => freshmartApi.getCourier(searchCourierId).then(r => r.data),
+    enabled: !!searchCourierId && searchCourierId.length > 3,
+    retry: false,
+  })
+
   const { data: stores = [] } = useQuery({
     queryKey: ['stores'],
     queryFn: () => freshmartApi.listStores().then(r => r.data),
@@ -201,10 +210,13 @@ export default function CouriersSchedulePage() {
         { subject_id: courierId, predicate: 'courier_home_store', object_value: data.home_store_id, object_type: 'entity_ref' },
         { subject_id: courierId, predicate: 'courier_status', object_value: data.courier_status, object_type: 'string' },
       ]
-      return triplesApi.createBatch(triples)
+      await triplesApi.createBatch(triples)
+      // Add a small delay to allow Materialize to process the change
+      await new Promise(resolve => setTimeout(resolve, 500))
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['couriers'] })
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ['couriers'] })
+      setCourierIdSearch('') // Clear search filter
       setShowCourierModal(false)
       setEditingCourier(undefined)
     },
@@ -233,9 +245,13 @@ export default function CouriersSchedulePage() {
         }
       }
       await Promise.all(updates)
+      // Add a small delay to allow Materialize to process the change
+      await new Promise(resolve => setTimeout(resolve, 500))
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['couriers'] })
+    onSuccess: async () => {
+      // Force refetch instead of just invalidate
+      await queryClient.refetchQueries({ queryKey: ['couriers'] })
+      setCourierIdSearch('') // Clear search filter
       setShowCourierModal(false)
       setEditingCourier(undefined)
     },
@@ -246,9 +262,13 @@ export default function CouriersSchedulePage() {
   })
 
   const deleteCourierMutation = useMutation({
-    mutationFn: (courierId: string) => triplesApi.deleteSubject(courierId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['couriers'] })
+    mutationFn: async (courierId: string) => {
+      await triplesApi.deleteSubject(courierId)
+      // Add a small delay to allow Materialize to process the change
+      await new Promise(resolve => setTimeout(resolve, 500))
+    },
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ['couriers'] })
       setDeleteCourierConfirm(null)
     },
   })
@@ -261,15 +281,27 @@ export default function CouriersSchedulePage() {
     }
   }
 
-  // Filter couriers by ID search
+  // Filter couriers by ID search and merge with direct database search result
   const filteredCouriers = useMemo(() => {
     if (!couriers) return []
-    if (!courierIdSearch) return couriers
-    const searchLower = courierIdSearch.toLowerCase()
-    return couriers.filter(c =>
-      c.courier_id.toLowerCase().includes(searchLower)
-    )
-  }, [couriers, courierIdSearch])
+
+    let filtered = couriers
+
+    // Client-side filter for partial matches
+    if (courierIdSearch) {
+      const searchLower = courierIdSearch.toLowerCase()
+      filtered = couriers.filter(c =>
+        c.courier_id.toLowerCase().includes(searchLower)
+      )
+    }
+
+    // Add the searched courier if it was found via direct database query and not already in the list
+    if (searchedCourier && !filtered.find(c => c.courier_id === searchedCourier.courier_id)) {
+      filtered = [searchedCourier, ...filtered]
+    }
+
+    return filtered
+  }, [couriers, courierIdSearch, searchedCourier])
 
   return (
     <div className="p-6">
@@ -302,17 +334,27 @@ export default function CouriersSchedulePage() {
 
       {couriers && (
         <>
-          <div className="mb-4">
+          <div className="mb-4 space-y-2">
             <div className="relative max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <input
                 type="text"
                 value={courierIdSearch}
                 onChange={e => setCourierIdSearch(e.target.value)}
-                placeholder="Search by courier ID..."
+                placeholder="Search by courier ID (e.g., C-0057)..."
                 className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
+            {!courierIdSearch && couriers.length >= 1000 && (
+              <div className="text-sm text-amber-600 bg-amber-50 px-3 py-2 rounded-lg max-w-md">
+                ⚠️ Showing first 1000 couriers only. Use search to find specific couriers.
+              </div>
+            )}
+            {courierIdSearch && searchedCourier && !couriers.find(c => c.courier_id === searchedCourier.courier_id) && (
+              <div className="text-sm text-blue-600 bg-blue-50 px-3 py-2 rounded-lg max-w-md">
+                ℹ️ Found courier from database (not in displayed list)
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

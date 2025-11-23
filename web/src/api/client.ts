@@ -193,7 +193,9 @@ export const freshmartApi = {
   listCustomers: () => apiClient.get<CustomerInfo[]>('/freshmart/customers'),
   listProducts: () => apiClient.get<ProductInfo[]>('/freshmart/products'),
   listCouriers: (params?: { status?: string }) =>
-    apiClient.get<CourierSchedule[]>('/freshmart/couriers', { params }),
+    apiClient.get<CourierSchedule[]>('/freshmart/couriers', { params: { ...params, limit: 1000 } }),
+  getCourier: (courierId: string) =>
+    apiClient.get<CourierSchedule>(`/freshmart/couriers/${encodeURIComponent(courierId)}`),
 }
 
 export const healthApi = {
