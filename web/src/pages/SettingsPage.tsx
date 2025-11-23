@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { healthApi } from '../api/client'
-import { CheckCircle, XCircle, Server, Database, Search } from 'lucide-react'
+import { CheckCircle, XCircle, Server, Database, Search, ExternalLink, BarChart3, FileText, Layers } from 'lucide-react'
 
 export default function SettingsPage() {
   const { data: health, error: healthError } = useQuery({
@@ -77,6 +77,64 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Dashboard Links */}
+      <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <h2 className="font-semibold text-lg mb-4">Dashboards & Tools</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <a
+            href="http://localhost:6874"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-2 p-4 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors group"
+          >
+            <Layers className="h-8 w-8 text-purple-600" />
+            <span className="font-medium text-purple-900">Materialize Console</span>
+            <span className="text-xs text-purple-600 flex items-center gap-1">
+              localhost:6874 <ExternalLink className="h-3 w-3" />
+            </span>
+          </a>
+
+          <a
+            href={`${apiUrl}/docs`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-2 p-4 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors group"
+          >
+            <FileText className="h-8 w-8 text-blue-600" />
+            <span className="font-medium text-blue-900">API Documentation</span>
+            <span className="text-xs text-blue-600 flex items-center gap-1">
+              Swagger UI <ExternalLink className="h-3 w-3" />
+            </span>
+          </a>
+
+          <a
+            href={`${apiUrl}/stats`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-2 p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors group"
+          >
+            <BarChart3 className="h-8 w-8 text-green-600" />
+            <span className="font-medium text-green-900">Query Statistics</span>
+            <span className="text-xs text-green-600 flex items-center gap-1">
+              Performance metrics <ExternalLink className="h-3 w-3" />
+            </span>
+          </a>
+
+          <a
+            href="http://localhost:9200"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center gap-2 p-4 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors group"
+          >
+            <Search className="h-8 w-8 text-orange-600" />
+            <span className="font-medium text-orange-900">OpenSearch</span>
+            <span className="text-xs text-orange-600 flex items-center gap-1">
+              localhost:9200 <ExternalLink className="h-3 w-3" />
+            </span>
+          </a>
         </div>
       </div>
 
