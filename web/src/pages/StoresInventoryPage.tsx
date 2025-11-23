@@ -381,7 +381,7 @@ export default function StoresInventoryPage() {
           subject_id: inventoryId,
           predicate: 'replenishment_eta',
           object_value: new Date(data.replenishment_eta).toISOString(),
-          object_type: 'datetime',
+          object_type: 'timestamp',
         })
       }
       return triplesApi.createBatch(triples)
@@ -402,7 +402,7 @@ export default function StoresInventoryPage() {
         { predicate: 'stock_level', value: data.stock_level, type: 'integer' },
       ]
       if (data.replenishment_eta) {
-        fields.push({ predicate: 'replenishment_eta', value: new Date(data.replenishment_eta).toISOString(), type: 'datetime' })
+        fields.push({ predicate: 'replenishment_eta', value: new Date(data.replenishment_eta).toISOString(), type: 'timestamp' })
       }
       for (const field of fields) {
         const existing = subjectInfo.triples.find(t => t.predicate === field.predicate)
