@@ -219,11 +219,20 @@ GET /freshmart/orders?status=OUT_FOR_DELIVERY
 # Get order details
 GET /freshmart/orders/order:FM-1001
 
-# List stores
+# List stores (includes inventory items)
 GET /freshmart/stores
 
 # Get store with inventory
 GET /freshmart/stores/store:BK-01
+
+# List inventory (with optional filters)
+GET /freshmart/stores/inventory?store_id=store:BK-01&low_stock_only=true
+
+# List customers
+GET /freshmart/customers
+
+# List products
+GET /freshmart/products
 
 # List couriers
 GET /freshmart/couriers?status=AVAILABLE
@@ -442,10 +451,11 @@ All FreshMart endpoints query precomputed, indexed materialized views - no on-th
 | API Endpoint | Materialized View | Index |
 |--------------|-------------------|-------|
 | `/freshmart/orders` | `orders_search_source_mv` | `orders_search_source_idx` |
-| `/freshmart/inventory` | `store_inventory_mv` | `store_inventory_idx` |
+| `/freshmart/stores/inventory` | `store_inventory_mv` | `store_inventory_idx` |
 | `/freshmart/couriers` | `courier_schedule_mv` | `courier_schedule_idx` |
 | `/freshmart/stores` | `stores_mv` | `stores_idx` |
 | `/freshmart/customers` | `customers_mv` | `customers_idx` |
+| `/freshmart/products` | `products_mv` | `products_idx` |
 
 The materialized views flatten the triple store into denormalized structures in the **compute cluster**, then indexes in the **serving cluster** provide sub-millisecond lookups.
 
@@ -464,9 +474,8 @@ docker-compose logs -f api | grep -E "\[Materialize\]"
 ### Running Tests
 
 ```bash
-# API tests (requires database connection)
+# API unit tests (no database required)
 cd api
-export PG_HOST=localhost PG_PORT=5432 PG_USER=postgres PG_PASSWORD=postgres PG_DATABASE=freshmart
 python -m pytest tests/ -v
 
 # Or run inside container
@@ -485,6 +494,46 @@ cd agents
 python -m pytest tests/ -v
 ```
 
+### Integration Tests
+
+The API includes integration tests that verify both PostgreSQL and Materialize read paths work correctly. These tests require running database connections.
+
+```bash
+cd api
+
+# Run all integration tests (requires both PG and MZ)
+PG_HOST=localhost PG_PORT=5432 PG_USER=postgres PG_PASSWORD=postgres PG_DATABASE=freshmart \
+MZ_HOST=localhost MZ_PORT=6875 MZ_USER=materialize MZ_PASSWORD=materialize MZ_DATABASE=materialize \
+python -m pytest tests/test_freshmart_service_integration.py -v
+```
+
+The integration tests include:
+
+| Test Class | Tests | Description |
+|------------|-------|-------------|
+| `TestPostgreSQLReadPath` | 9 | Verifies FreshMart queries using PostgreSQL views |
+| `TestMaterializeReadPath` | 9 | Verifies FreshMart queries using Materialize MVs |
+| `TestCrossBackendConsistency` | 6 | Confirms both backends return identical data |
+| `TestViewMapping` | 2 | Unit tests for view name mapping |
+
+**Key tests:**
+- `test_list_stores_includes_inventory` - Verifies stores include inventory items
+- `test_list_products_returns_data` - Verifies products API works
+- `test_stores_match_between_backends` - Confirms PG and MZ return same stores
+- `test_inventory_match_between_backends` - Confirms PG and MZ return same inventory
+
+Run specific test classes:
+```bash
+# PostgreSQL only
+PG_HOST=localhost ... python -m pytest tests/test_freshmart_service_integration.py::TestPostgreSQLReadPath -v
+
+# Materialize only
+MZ_HOST=localhost ... python -m pytest tests/test_freshmart_service_integration.py::TestMaterializeReadPath -v
+
+# Cross-backend consistency
+python -m pytest tests/test_freshmart_service_integration.py::TestCrossBackendConsistency -v
+```
+
 ### Environment Variables
 
 See `.env.example` for all available configuration:
@@ -499,7 +548,24 @@ MZ_EXTERNAL_URL=postgresql://user:pass@host:6875/materialize
 # LLM API keys for agents
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+
+# Feature flags
+USE_MATERIALIZE_FOR_READS=true  # Set to false to query PostgreSQL instead of Materialize
 ```
+
+#### Running Against PostgreSQL
+
+By default, FreshMart read queries (`/freshmart/*` endpoints) use Materialize's indexed materialized views for low-latency access. To query PostgreSQL directly instead:
+
+```bash
+# Set in .env or docker-compose.yml
+USE_MATERIALIZE_FOR_READS=false
+```
+
+This is useful for:
+- Development without Materialize
+- Debugging query differences
+- Environments where Materialize isn't available
 
 ### Extending the Ontology
 
