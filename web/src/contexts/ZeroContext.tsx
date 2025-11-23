@@ -53,18 +53,23 @@ export function ZeroProvider({ children, url: customUrl }: ZeroProviderProps) {
   const subscriptionsRef = useRef<Set<string>>(new Set()) // Track subscriptions without causing re-renders
   const initialStateReceived = useRef<Set<string>>(new Set()) // Track which collections have received initial state
   const pendingChanges = useRef<Map<string, any[]>>(new Map()) // Queue changes until initial state is received
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const reconnectAttemptsRef = useRef(0)
 
-  useEffect(() => {
+  const connectWebSocket = useCallback(() => {
+    // Clear any existing reconnect timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+
     // Reuse existing socket if it's still open
     if (sharedSocket && (sharedSocket.readyState === WebSocket.OPEN || sharedSocket.readyState === WebSocket.CONNECTING)) {
       console.log('[Zero] Reusing existing WebSocket connection')
       setSocket(sharedSocket)
       setConnected(sharedSocket.readyState === WebSocket.OPEN)
       subscriptionsRef.current = sharedSubscriptions
-      return () => {
-        // Don't close shared socket on component unmount
-        console.log('[Zero] Component unmounting, keeping shared socket alive')
-      }
+      return
     }
 
     console.log(`[Zero] Creating new WebSocket connection to ${url}`)
@@ -75,6 +80,13 @@ export function ZeroProvider({ children, url: customUrl }: ZeroProviderProps) {
       console.log('[Zero] ✅ Connected to Zero server')
       setConnected(true)
       setError(null)
+      reconnectAttemptsRef.current = 0 // Reset reconnect attempts on successful connection
+
+      // Resubscribe to all collections that were previously subscribed
+      sharedSubscriptions.forEach(collection => {
+        console.log(`[Zero] 🔄 Resubscribing to ${collection} after reconnect`)
+        ws.send(JSON.stringify({ type: 'subscribe', collection }))
+      })
     }
 
     ws.onclose = (event) => {
@@ -84,9 +96,19 @@ export function ZeroProvider({ children, url: customUrl }: ZeroProviderProps) {
       console.log('  Was clean:', event.wasClean)
       setConnected(false)
       sharedSocket = null
-      sharedSubscriptions.clear()
-      subscriptionsRef.current.clear()
-      setSubscriptions(new Set())
+
+      // Don't clear subscriptions - we want to resubscribe on reconnect
+      // sharedSubscriptions.clear()
+
+      // Attempt to reconnect with exponential backoff
+      const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000) // Max 10 seconds
+      reconnectAttemptsRef.current++
+      console.log(`[Zero] 🔄 Reconnecting in ${backoffDelay}ms (attempt ${reconnectAttemptsRef.current})`)
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        console.log('[Zero] 🔄 Attempting to reconnect...')
+        connectWebSocket()
+      }, backoffDelay)
     }
 
     ws.onerror = (event) => {
@@ -117,15 +139,21 @@ export function ZeroProvider({ children, url: customUrl }: ZeroProviderProps) {
     }
 
     setSocket(ws)
+  }, [url])
+
+  useEffect(() => {
+    connectWebSocket()
 
     return () => {
-      // Only close if this is NOT the shared socket (shouldn't happen, but just in case)
-      if (ws !== sharedSocket) {
-        console.log('[Zero] 🧹 Closing non-shared WebSocket')
-        ws.close()
+      // Cleanup on unmount
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
       }
+      // Don't close shared socket on component unmount
+      console.log('[Zero] Component unmounting, keeping shared socket alive')
     }
-  }, [url])
+  }, [connectWebSocket])
 
   const handleMessage = useCallback((message: any) => {
     switch (message.type) {
@@ -188,6 +216,8 @@ export function ZeroProvider({ children, url: customUrl }: ZeroProviderProps) {
 
       case 'changes':
         console.log(`Received ${message.changes?.length} changes`)
+        console.error(`🚨 CHANGES MESSAGE RECEIVED! Count: ${message.changes?.length}`)
+        document.title = `🔔 ${message.changes?.length} changes - ${Date.now()}`
 
         // Check if any changes are for collections that haven't received initial state yet
         const changesForUninitializedCollections = message.changes?.filter((change: any) =>

@@ -201,14 +201,24 @@ export class ZeroServer {
     const subscribers = this.subscriptions.get(collection);
     if (subscribers) {
       let sentCount = 0;
-      subscribers.forEach((client) => {
+      let skippedCount = 0;
+      subscribers.forEach((client, index) => {
+        console.log(`  📡 Client ${index}: readyState=${client.readyState} (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED)`);
         if (client.readyState === 1) {
           // WebSocket.OPEN
-          client.send(message);
-          sentCount++;
+          try {
+            client.send(message);
+            sentCount++;
+            console.log(`    ✅ Message sent to client ${index}`);
+          } catch (error) {
+            console.error(`    ❌ Error sending to client ${index}:`, error);
+          }
+        } else {
+          skippedCount++;
+          console.log(`    ⏭️  Skipped client ${index} (not in OPEN state)`);
         }
       });
-      console.log(`  ✅ Sent to ${sentCount} connected clients`);
+      console.log(`  ✅ Sent to ${sentCount}/${subscribers.size} clients (${skippedCount} skipped)`);
     } else {
       console.log(`  ⚠️ No subscribers for ${collection}`);
     }
