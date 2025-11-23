@@ -4,9 +4,10 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.client import get_pg_session_factory
+from src.db.client import get_mz_session_factory
 from src.freshmart.models import (
     CourierSchedule,
     OrderFilter,
@@ -20,20 +21,21 @@ router = APIRouter(prefix="/freshmart", tags=["FreshMart Operations"])
 
 
 async def get_session() -> AsyncSession:
-    """Dependency to get database session."""
-    factory = get_pg_session_factory()
+    """Dependency to get Materialize session with serving cluster."""
+    factory = get_mz_session_factory()
     async with factory() as session:
         try:
+            # Use the serving cluster for low-latency indexed queries
+            await session.execute(text("SET CLUSTER = serving"))
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise
 
 
 async def get_freshmart_service(session: AsyncSession = Depends(get_session)) -> FreshMartService:
-    """Dependency to get FreshMart service."""
-    return FreshMartService(session)
+    """Dependency to get FreshMart service configured for Materialize."""
+    return FreshMartService(session, use_materialize=True)
 
 
 # =============================================================================

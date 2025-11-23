@@ -62,16 +62,19 @@ You can verify the setup by visiting the Materialize Console at http://localhost
 │                         Port: 8080                                       │
 │  • Ontology CRUD       • Triple CRUD with validation                     │
 │  • FreshMart endpoints • Health checks                                   │
+│  • Query logging with execution time                                     │
 └──────────────┬────────────────────────────────────┬─────────────────────┘
                │                                    │
+               │ (writes)                           │ (UI reads)
                ▼                                    ▼
 ┌──────────────────────────┐         ┌──────────────────────────┐
 │     PostgreSQL           │         │   Materialize Emulator    │
 │     Port: 5432           │────────▶│  Console: 6874 SQL: 6875  │
-│  • ontology_classes      │         │  Three-Tier Architecture: │
+│  • ontology_classes      │ (CDC)   │  Three-Tier Architecture: │
 │  • ontology_properties   │         │  • ingest: pg_source      │
-│  • triples               │         │  • serving: indexes       │
-└──────────────────────────┘         └───────────┬──────────────┘
+│  • triples               │         │  • compute: MVs           │
+└──────────────────────────┘         │  • serving: indexes       │
+                                     └───────────┬──────────────┘
                                                  │
                                                  ▼
                                      ┌──────────────────────────┐
@@ -253,6 +256,98 @@ curl http://localhost:8081/health
 curl -X POST http://localhost:8081/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Show all OUT_FOR_DELIVERY orders"}'
+```
+
+## Operations
+
+### Service Management
+
+```bash
+# Restart the API service
+docker-compose restart api
+
+# Restart all services
+docker-compose restart
+
+# Rebuild and restart API (after code changes)
+docker-compose up -d --build api
+
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (full reset)
+docker-compose down -v
+```
+
+### Viewing Logs
+
+```bash
+# View API logs (with query timing)
+docker-compose logs -f api
+
+# View last 100 lines of API logs
+docker-compose logs --tail=100 api
+
+# View logs for multiple services
+docker-compose logs -f api mz
+
+# View Materialize logs
+docker-compose logs -f mz
+
+# View all service logs
+docker-compose logs -f
+```
+
+### Query Logging
+
+All database queries are logged with execution time. The logs show:
+- **Database**: `[PostgreSQL]` or `[Materialize]`
+- **Operation**: `[SELECT]`, `[INSERT]`, `[UPDATE]`, `[DELETE]`, or `[SET]`
+- **Execution time**: in milliseconds
+- **Query**: SQL statement (truncated if > 200 chars)
+- **Parameters**: query parameters
+
+Example log output:
+```
+[Materialize] [SET] 1.23ms: SET CLUSTER = serving | params={}
+[Materialize] [SELECT] 15.67ms: SELECT order_id, order_number, order_status... | params={'limit': 100, 'offset': 0}
+[PostgreSQL] [INSERT] 3.45ms: INSERT INTO triples (subject_id, predicate...) | params={'subject_id': 'order:FM-1001', ...}
+[PostgreSQL] [UPDATE] 2.89ms: UPDATE triples SET object_value = ... | params={'id': 123, 'value': 'DELIVERED'}
+```
+
+To see query logs in real-time:
+```bash
+docker-compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
+```
+
+Filter by operation type:
+```bash
+# Only show writes (should all be PostgreSQL)
+docker-compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
+
+# Only show reads (should all be Materialize for UI queries)
+docker-compose logs -f api | grep "\[SELECT\]"
+```
+
+### Materialize Three-Tier Architecture
+
+UI read queries hit Materialize's **serving cluster** for low-latency indexed access:
+
+```
+UI → API → Materialize (serving cluster) → Indexed Materialized Views
+```
+
+The architecture uses three clusters:
+- **ingest**: PostgreSQL source replication
+- **compute**: Materialized view computation
+- **serving**: Indexes for low-latency queries
+
+To verify queries are hitting the serving cluster:
+```bash
+# Check from Materialize console
+docker-compose exec mz psql -U materialize -c "SHOW CLUSTER;"
+
+# Should show: serving (when queried from API)
 ```
 
 ## Development
