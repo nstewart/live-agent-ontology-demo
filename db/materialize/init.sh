@@ -3,9 +3,14 @@
 # Run this after docker-compose up to set up Materialize
 #
 # Architecture:
-#   ingest cluster  -> Sources (PostgreSQL connection)
-#   compute cluster -> (reserved for future transformations)
-#   serving cluster -> Indexes on views
+#   ingest cluster  -> Sources (PostgreSQL logical replication)
+#   compute cluster -> Materialized views (persist transformation results)
+#   serving cluster -> Indexes (serve queries with low latency)
+#
+# Pattern:
+#   - Regular views for intermediate transformations (no cluster)
+#   - Materialized views IN CLUSTER compute for "topmost" views that serve results
+#   - Indexes IN CLUSTER serving ON materialized views
 
 set -e
 
@@ -41,7 +46,7 @@ CREATE CONNECTION IF NOT EXISTS pg_connection TO POSTGRES (
     DATABASE 'freshmart'
 );" || true
 
-echo "Creating source in ingest cluster..."
+echo "Creating source IN CLUSTER ingest..."
 
 # Create source in ingest cluster
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
@@ -53,38 +58,9 @@ CREATE SOURCE IF NOT EXISTS pg_source
 echo "Waiting for source to hydrate..."
 sleep 5
 
-echo "Creating views..."
+echo "Creating regular views for intermediate transformations..."
 
-# Create views (one at a time due to Materialize transaction requirements)
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS orders_flat AS
-SELECT
-    subject_id AS order_id,
-    MAX(CASE WHEN predicate = 'order_number' THEN object_value END) AS order_number,
-    MAX(CASE WHEN predicate = 'order_status' THEN object_value END) AS order_status,
-    MAX(CASE WHEN predicate = 'order_store' THEN object_value END) AS store_id,
-    MAX(CASE WHEN predicate = 'placed_by' THEN object_value END) AS customer_id,
-    MAX(CASE WHEN predicate = 'delivery_window_start' THEN object_value END) AS delivery_window_start,
-    MAX(CASE WHEN predicate = 'delivery_window_end' THEN object_value END) AS delivery_window_end,
-    MAX(CASE WHEN predicate = 'order_total_amount' THEN object_value END)::DECIMAL(10,2) AS order_total_amount,
-    MAX(updated_at) AS effective_updated_at
-FROM triples
-WHERE subject_id LIKE 'order:%'
-GROUP BY subject_id;" || true
-
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS store_inventory AS
-SELECT
-    subject_id AS inventory_id,
-    MAX(CASE WHEN predicate = 'inventory_store' THEN object_value END) AS store_id,
-    MAX(CASE WHEN predicate = 'inventory_product' THEN object_value END) AS product_id,
-    MAX(CASE WHEN predicate = 'stock_level' THEN object_value END)::INT AS stock_level,
-    MAX(CASE WHEN predicate = 'replenishment_eta' THEN object_value END) AS replenishment_eta,
-    MAX(updated_at) AS effective_updated_at
-FROM triples
-WHERE subject_id LIKE 'inventory:%'
-GROUP BY subject_id;" || true
-
+# Create regular views (one at a time due to Materialize transaction requirements)
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE VIEW IF NOT EXISTS customers_flat AS
 SELECT
@@ -122,8 +98,40 @@ FROM triples
 WHERE subject_id LIKE 'task:%'
 GROUP BY subject_id;" || true
 
+echo "Creating materialized views IN CLUSTER compute..."
+
+# Create materialized views in compute cluster
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS orders_search_source AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS orders_flat_mv IN CLUSTER compute AS
+SELECT
+    subject_id AS order_id,
+    MAX(CASE WHEN predicate = 'order_number' THEN object_value END) AS order_number,
+    MAX(CASE WHEN predicate = 'order_status' THEN object_value END) AS order_status,
+    MAX(CASE WHEN predicate = 'order_store' THEN object_value END) AS store_id,
+    MAX(CASE WHEN predicate = 'placed_by' THEN object_value END) AS customer_id,
+    MAX(CASE WHEN predicate = 'delivery_window_start' THEN object_value END) AS delivery_window_start,
+    MAX(CASE WHEN predicate = 'delivery_window_end' THEN object_value END) AS delivery_window_end,
+    MAX(CASE WHEN predicate = 'order_total_amount' THEN object_value END)::DECIMAL(10,2) AS order_total_amount,
+    MAX(updated_at) AS effective_updated_at
+FROM triples
+WHERE subject_id LIKE 'order:%'
+GROUP BY subject_id;" || true
+
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS store_inventory_mv IN CLUSTER compute AS
+SELECT
+    subject_id AS inventory_id,
+    MAX(CASE WHEN predicate = 'inventory_store' THEN object_value END) AS store_id,
+    MAX(CASE WHEN predicate = 'inventory_product' THEN object_value END) AS product_id,
+    MAX(CASE WHEN predicate = 'stock_level' THEN object_value END)::INT AS stock_level,
+    MAX(CASE WHEN predicate = 'replenishment_eta' THEN object_value END) AS replenishment_eta,
+    MAX(updated_at) AS effective_updated_at
+FROM triples
+WHERE subject_id LIKE 'inventory:%'
+GROUP BY subject_id;" || true
+
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS orders_search_source_mv IN CLUSTER compute AS
 SELECT
     o.order_id,
     o.order_number,
@@ -143,34 +151,38 @@ SELECT
     dt.task_status AS delivery_task_status,
     dt.eta AS delivery_eta,
     GREATEST(o.effective_updated_at, c.effective_updated_at, s.effective_updated_at, dt.effective_updated_at) AS effective_updated_at
-FROM orders_flat o
+FROM orders_flat_mv o
 LEFT JOIN customers_flat c ON c.customer_id = o.customer_id
 LEFT JOIN stores_flat s ON s.store_id = o.store_id
 LEFT JOIN delivery_tasks_flat dt ON dt.order_id = o.order_id;" || true
 
-echo "Creating indexes in serving cluster..."
+echo "Creating indexes IN CLUSTER serving on materialized views..."
 
-# Create indexes in serving cluster (makes views queryable with low latency)
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_flat_idx IN CLUSTER serving ON orders_flat (order_id);" || true
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_inventory_idx IN CLUSTER serving ON store_inventory (inventory_id);" || true
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_search_source_idx IN CLUSTER serving ON orders_search_source (order_id);" || true
+# Create indexes in serving cluster on materialized views
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_flat_idx IN CLUSTER serving ON orders_flat_mv (order_id);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_inventory_idx IN CLUSTER serving ON store_inventory_mv (inventory_id);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_search_source_idx IN CLUSTER serving ON orders_search_source_mv (order_id);" || true
 
-echo "Verifying setup..."
+echo "Verifying three-tier setup..."
 echo ""
 echo "=== Clusters ==="
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SELECT name, replicas FROM (SHOW CLUSTERS) WHERE name IN ('ingest', 'compute', 'serving');"
 
 echo ""
-echo "=== Views ==="
+echo "=== Regular Views (intermediate transformations) ==="
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SELECT name FROM (SHOW VIEWS);"
 
 echo ""
-echo "=== Indexes ==="
+echo "=== Materialized Views (IN CLUSTER compute) ==="
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SELECT name, cluster FROM (SHOW MATERIALIZED VIEWS);"
+
+echo ""
+echo "=== Indexes (IN CLUSTER serving) ==="
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SELECT name, on AS view_name, cluster FROM (SHOW INDEXES);"
 
 echo ""
 echo "=== Order Count ==="
-COUNT=$(psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SET CLUSTER = serving; SELECT count(*) FROM orders_search_source;")
+COUNT=$(psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -t -c "SET CLUSTER = serving; SELECT count(*) FROM orders_search_source_mv;")
 echo "Orders in Materialize: $COUNT"
 
 echo ""

@@ -159,34 +159,39 @@ Materialize uses a three-tier architecture for optimal resource allocation:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        Three-Tier Architecture                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  INGEST CLUSTER (25cc)        │  COMPUTE CLUSTER (25cc)                     │
-│  • pg_source                  │  • (reserved for future                     │
-│  • Replicates triples table   │     complex transformations)                │
-│  • Logical replication        │                                             │
-├───────────────────────────────┴─────────────────────────────────────────────┤
-│                        SERVING CLUSTER (25cc)                                │
-│  • Indexes on views for low-latency queries                                  │
-│  • orders_flat_idx, store_inventory_idx, orders_search_source_idx           │
+│  INGEST CLUSTER (25cc)                                                       │
+│  • pg_source - Replicates triples table via PostgreSQL logical replication  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  COMPUTE CLUSTER (25cc)                                                      │
+│  • Materialized views that persist transformation results:                   │
+│    - orders_flat_mv, store_inventory_mv, orders_search_source_mv            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SERVING CLUSTER (25cc)                                                      │
+│  • Indexes on materialized views for low-latency queries:                    │
+│    - orders_flat_idx, store_inventory_idx, orders_search_source_idx         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Views** (regular views, not materialized):
+**Regular Views** (intermediate transformations, no cluster):
 ```sql
--- Flattened entity views
-orders_flat (order_id, order_number, status, customer_id, store_id, ...)
-store_inventory (inventory_id, store_id, product_id, stock_level, ...)
+-- Helper views used by materialized views
 customers_flat, stores_flat, delivery_tasks_flat
-
--- Enriched view for OpenSearch sync
-orders_search_source (joins orders with customers, stores, delivery tasks)
 ```
 
-**Indexes** (in serving cluster):
+**Materialized Views** (IN CLUSTER compute):
 ```sql
--- Indexes make views queryable with low latency
-CREATE INDEX orders_flat_idx IN CLUSTER serving ON orders_flat (order_id);
-CREATE INDEX store_inventory_idx IN CLUSTER serving ON store_inventory (inventory_id);
-CREATE INDEX orders_search_source_idx IN CLUSTER serving ON orders_search_source (order_id);
+-- Topmost views that persist results for serving
+CREATE MATERIALIZED VIEW orders_flat_mv IN CLUSTER compute AS ...
+CREATE MATERIALIZED VIEW store_inventory_mv IN CLUSTER compute AS ...
+CREATE MATERIALIZED VIEW orders_search_source_mv IN CLUSTER compute AS ...
+```
+
+**Indexes** (IN CLUSTER serving ON materialized views):
+```sql
+-- Indexes make materialized views queryable with low latency
+CREATE INDEX orders_flat_idx IN CLUSTER serving ON orders_flat_mv (order_id);
+CREATE INDEX store_inventory_idx IN CLUSTER serving ON store_inventory_mv (inventory_id);
+CREATE INDEX orders_search_source_idx IN CLUSTER serving ON orders_search_source_mv (order_id);
 ```
 
 Access the Materialize Console at http://localhost:6874 to monitor clusters, sources, views, and indexes.

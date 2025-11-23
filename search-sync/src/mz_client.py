@@ -61,7 +61,7 @@ class MaterializeClient:
                         delivery_task_status,
                         delivery_eta,
                         effective_updated_at
-                    FROM orders_search_source
+                    FROM orders_search_source_mv
                     WHERE effective_updated_at > %s
                     ORDER BY effective_updated_at
                     LIMIT {int(batch_size)}
