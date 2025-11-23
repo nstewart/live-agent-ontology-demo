@@ -234,9 +234,10 @@ function OrderCard({
         </div>
       </div>
       <div className="space-y-1 text-sm">
-        <p className="text-gray-600">
-          <span className="font-medium">Store:</span> {order.store_name || order.store_id}
-        </p>
+        <div className="text-gray-600">
+          <p><span className="font-medium">Store:</span> {order.store_name || 'Unknown'}</p>
+          <p className="text-xs text-gray-400">{order.store_id}</p>
+        </div>
         <p className="text-gray-600">
           <span className="font-medium">Window:</span>{' '}
           {order.delivery_window_start?.slice(11, 16)} - {order.delivery_window_end?.slice(11, 16)}

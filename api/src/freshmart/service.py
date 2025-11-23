@@ -44,7 +44,7 @@ class FreshMartService:
         offset: int = 0,
     ) -> list[OrderFlat]:
         """List orders with optional filtering."""
-        view = f"orders_flat{self._view_suffix()}"
+        view = "orders_search_source_mv" if self.use_materialize else "orders_search_source"
 
         conditions = []
         params: dict = {"limit": limit, "offset": offset}
@@ -71,6 +71,7 @@ class FreshMartService:
         query = f"""
             SELECT order_id, order_number, order_status, store_id, customer_id,
                    delivery_window_start, delivery_window_end, order_total_amount,
+                   customer_name, store_name,
                    effective_updated_at
             FROM {view}
             {where_clause}
@@ -91,6 +92,8 @@ class FreshMartService:
                 delivery_window_start=row.delivery_window_start,
                 delivery_window_end=row.delivery_window_end,
                 order_total_amount=row.order_total_amount,
+                customer_name=row.customer_name,
+                store_name=row.store_name,
                 effective_updated_at=row.effective_updated_at,
             )
             for row in rows
