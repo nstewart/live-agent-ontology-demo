@@ -211,8 +211,6 @@ export default function CouriersSchedulePage() {
         { subject_id: courierId, predicate: 'courier_status', object_value: data.courier_status, object_type: 'string' },
       ]
       await triplesApi.createBatch(triples)
-      // Add a small delay to allow Materialize to process the change
-      await new Promise(resolve => setTimeout(resolve, 500))
     },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ['couriers'] })
@@ -245,8 +243,6 @@ export default function CouriersSchedulePage() {
         }
       }
       await Promise.all(updates)
-      // Add a small delay to allow Materialize to process the change
-      await new Promise(resolve => setTimeout(resolve, 500))
     },
     onSuccess: async () => {
       // Force refetch instead of just invalidate
@@ -264,8 +260,6 @@ export default function CouriersSchedulePage() {
   const deleteCourierMutation = useMutation({
     mutationFn: async (courierId: string) => {
       await triplesApi.deleteSubject(courierId)
-      // Add a small delay to allow Materialize to process the change
-      await new Promise(resolve => setTimeout(resolve, 500))
     },
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ['couriers'] })
