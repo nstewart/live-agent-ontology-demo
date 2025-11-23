@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { freshmartApi, triplesApi, CourierSchedule, TripleCreate, StoreInfo } from '../api/client'
-import { Truck, Bike, Car, Coffee, Plus, Edit2, Trash2, X } from 'lucide-react'
+import { Truck, Bike, Car, Coffee, Plus, Edit2, Trash2, X, Search, ExternalLink } from 'lucide-react'
 
 const vehicleIcons: Record<string, typeof Truck> = {
   BIKE: Bike,
@@ -179,6 +179,8 @@ export default function CouriersSchedulePage() {
   const [showCourierModal, setShowCourierModal] = useState(false)
   const [editingCourier, setEditingCourier] = useState<CourierSchedule | undefined>()
   const [deleteCourierConfirm, setDeleteCourierConfirm] = useState<CourierSchedule | null>(null)
+  const [courierIdSearch, setCourierIdSearch] = useState('')
+  const [viewTasksCourier, setViewTasksCourier] = useState<CourierSchedule | null>(null)
 
   const { data: couriers, isLoading, error } = useQuery({
     queryKey: ['couriers'],
@@ -259,6 +261,16 @@ export default function CouriersSchedulePage() {
     }
   }
 
+  // Filter couriers by ID search
+  const filteredCouriers = useMemo(() => {
+    if (!couriers) return []
+    if (!courierIdSearch) return couriers
+    const searchLower = courierIdSearch.toLowerCase()
+    return couriers.filter(c =>
+      c.courier_id.toLowerCase().includes(searchLower)
+    )
+  }, [couriers, courierIdSearch])
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -289,8 +301,22 @@ export default function CouriersSchedulePage() {
       )}
 
       {couriers && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {couriers.map(courier => {
+        <>
+          <div className="mb-4">
+            <div className="relative max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={courierIdSearch}
+                onChange={e => setCourierIdSearch(e.target.value)}
+                placeholder="Search by courier ID..."
+                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredCouriers.map(courier => {
             const VehicleIcon = vehicleIcons[courier.vehicle_type || ''] || Truck
             const homeStore = stores.find(s => s.store_id === courier.home_store_id)
             return (
@@ -346,36 +372,48 @@ export default function CouriersSchedulePage() {
                       No active tasks
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {courier.tasks.map((task, idx) => (
-                        <div
-                          key={task.task_id || idx}
-                          className="bg-gray-50 rounded p-2 text-sm"
-                        >
-                          <div className="flex justify-between">
-                            <span className="font-medium">{task.order_id}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${
-                              task.task_status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
-                              task.task_status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
-                              'bg-gray-100 text-gray-700'
-                            }`}>
-                              {task.task_status}
-                            </span>
+                    <>
+                      <div className="space-y-2">
+                        {courier.tasks.slice(0, 5).map((task, idx) => (
+                          <div
+                            key={task.task_id || idx}
+                            className="bg-gray-50 rounded p-2 text-sm"
+                          >
+                            <div className="flex justify-between">
+                              <span className="font-medium">{task.order_id}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                task.task_status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
+                                task.task_status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                                'bg-gray-100 text-gray-700'
+                              }`}>
+                                {task.task_status}
+                              </span>
+                            </div>
+                            {task.eta && (
+                              <p className="text-gray-500 text-xs mt-1">
+                                ETA: {task.eta.slice(11, 16)}
+                              </p>
+                            )}
                           </div>
-                          {task.eta && (
-                            <p className="text-gray-500 text-xs mt-1">
-                              ETA: {task.eta.slice(11, 16)}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                      {courier.tasks.length > 5 && (
+                        <button
+                          onClick={() => setViewTasksCourier(courier)}
+                          className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View All {courier.tasks.length} Tasks
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
             )
           })}
         </div>
+        </>
       )}
 
       <CourierFormModal
@@ -407,6 +445,83 @@ export default function CouriersSchedulePage() {
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
               >
                 {deleteCourierMutation.isPending ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View All Tasks Modal */}
+      {viewTasksCourier && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-4 border-b">
+              <div>
+                <h2 className="text-lg font-semibold">
+                  {viewTasksCourier.courier_name} - All Tasks
+                </h2>
+                <p className="text-sm text-gray-500">
+                  {viewTasksCourier.courier_id.replace('courier:', '')} • {viewTasksCourier.tasks.length} total tasks
+                </p>
+              </div>
+              <button onClick={() => setViewTasksCourier(null)} className="text-gray-500 hover:text-gray-700">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              {viewTasksCourier.tasks.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Coffee className="h-8 w-8 mx-auto mb-2" />
+                  <p>No tasks assigned</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {viewTasksCourier.tasks.map((task, idx) => (
+                    <div
+                      key={task.task_id || idx}
+                      className="bg-gray-50 rounded-lg p-4 border border-gray-200"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <h3 className="font-medium text-gray-900">{task.order_id}</h3>
+                          {task.task_id && (
+                            <p className="text-xs text-gray-500 mt-0.5">{task.task_id}</p>
+                          )}
+                        </div>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          task.task_status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
+                          task.task_status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
+                          task.task_status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {task.task_status}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {task.eta && (
+                          <div>
+                            <span className="text-gray-500">ETA:</span>
+                            <span className="ml-2 text-gray-900">{task.eta.slice(0, 16).replace('T', ' ')}</span>
+                          </div>
+                        )}
+                        {task.route_sequence !== undefined && task.route_sequence !== null && (
+                          <div>
+                            <span className="text-gray-500">Sequence:</span>
+                            <span className="ml-2 text-gray-900">#{task.route_sequence}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t bg-gray-50">
+              <button
+                onClick={() => setViewTasksCourier(null)}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Close
               </button>
             </div>
           </div>
