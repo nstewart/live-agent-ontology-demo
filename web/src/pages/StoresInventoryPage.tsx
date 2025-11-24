@@ -217,7 +217,7 @@ function InventoryFormModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
         <div className="flex justify-between items-center p-4 border-b">
           <h2 className="text-lg font-semibold">{inventory ? 'Edit Inventory' : 'Add Inventory Item'}</h2>
@@ -342,6 +342,15 @@ export default function StoresInventoryPage() {
       })
     }
 
+    // Sort inventory items by id for stable display
+    inventoryByStore.forEach((items, storeId) => {
+      items.sort((a, b) => {
+        const aId = a.inventory_id || a.id || ''
+        const bId = b.inventory_id || b.id || ''
+        return aId.localeCompare(bId)
+      })
+    })
+
     // Merge stores with their inventory items
     return sortedZeroStores.map(store => ({
       ...store,
@@ -367,12 +376,12 @@ export default function StoresInventoryPage() {
         { subject_id: storeId, predicate: 'store_zone', object_value: data.store_zone, object_type: 'string' },
         { subject_id: storeId, predicate: 'store_status', object_value: data.store_status, object_type: 'string' },
       ]
-      if (data.store_capacity_orders_per_hour) {
+      if (data.store_capacity_orders_per_hour && data.store_capacity_orders_per_hour.trim() !== '') {
         triples.push({
           subject_id: storeId,
           predicate: 'store_capacity_orders_per_hour',
-          object_value: data.store_capacity_orders_per_hour,
-          object_type: 'integer',
+          object_value: String(data.store_capacity_orders_per_hour),
+          object_type: 'int',
         })
       }
       return triplesApi.createBatch(triples)
@@ -428,7 +437,7 @@ export default function StoresInventoryPage() {
       const triples: TripleCreate[] = [
         { subject_id: inventoryId, predicate: 'inventory_store', object_value: data.store_id, object_type: 'entity_ref' },
         { subject_id: inventoryId, predicate: 'inventory_product', object_value: data.product_id, object_type: 'entity_ref' },
-        { subject_id: inventoryId, predicate: 'stock_level', object_value: data.stock_level, object_type: 'integer' },
+        { subject_id: inventoryId, predicate: 'stock_level', object_value: String(data.stock_level), object_type: 'int' },
       ]
       if (data.replenishment_eta) {
         triples.push({
@@ -453,7 +462,7 @@ export default function StoresInventoryPage() {
       const updates: Promise<unknown>[] = []
       const fields: { predicate: string; value: string; type: TripleCreate['object_type'] }[] = [
         { predicate: 'inventory_product', value: data.product_id, type: 'entity_ref' },
-        { predicate: 'stock_level', value: data.stock_level, type: 'integer' },
+        { predicate: 'stock_level', value: String(data.stock_level), type: 'integer' },
       ]
       if (data.replenishment_eta) {
         fields.push({ predicate: 'replenishment_eta', value: new Date(data.replenishment_eta).toISOString(), type: 'datetime' })
