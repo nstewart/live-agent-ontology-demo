@@ -215,50 +215,116 @@ function OrderFormModal({
   )
 }
 
-function OrderCard({
-  order,
+function OrdersTable({
+  orders,
   onEdit,
   onDelete,
 }: {
-  order: OrderFlat
+  orders: OrderFlat[]
   onEdit: (order: OrderFlat) => void
   onDelete: (order: OrderFlat) => void
 }) {
   return (
-    <div className="bg-white rounded-lg shadow p-4 hover:shadow-md transition-shadow">
-      <div className="flex justify-between items-start mb-3">
-        <div>
-          <h3 className="font-semibold text-gray-900">{order.order_number}</h3>
-          <p className="text-sm text-gray-500">{order.customer_name}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={order.order_status} />
-          <button
-            onClick={() => onEdit(order)}
-            className="p-1 text-gray-400 hover:text-blue-600"
-            title="Edit order"
-          >
-            <Edit2 className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => onDelete(order)}
-            className="p-1 text-gray-400 hover:text-red-600"
-            title="Delete order"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-      <div className="space-y-1 text-sm">
-        <div className="text-gray-600">
-          <p><span className="font-medium">Store:</span> {order.store_name || 'Unknown'}</p>
-          <p className="text-xs text-gray-400">{order.store_id}</p>
-        </div>
-        <p className="text-gray-600">
-          <span className="font-medium">Window:</span>{' '}
-          {order.delivery_window_start?.slice(11, 16)} - {order.delivery_window_end?.slice(11, 16)}
-        </p>
-        <p className="text-gray-900 font-medium">${formatAmount(order.order_total_amount)}</p>
+    <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Order
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Customer
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Store
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Delivery Window
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Amount
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Courier
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {orders.map((order) => (
+              <tr key={order.order_id} className="hover:bg-gray-50">
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="text-sm font-medium text-gray-900">{order.order_number}</div>
+                  <div className="text-xs text-gray-400">{order.order_id}</div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <StatusBadge status={order.order_status} />
+                </td>
+                <td className="px-4 py-3">
+                  <div className="text-sm text-gray-900">{order.customer_name || 'Unknown'}</div>
+                  <div className="text-xs text-gray-500 truncate max-w-xs">{order.customer_address}</div>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="text-sm text-gray-900">{order.store_name || 'Unknown'}</div>
+                  <div className="text-xs text-gray-500">{order.store_zone}</div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {order.delivery_window_start?.slice(11, 16)} - {order.delivery_window_end?.slice(11, 16)}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {order.delivery_window_start?.slice(0, 10)}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="text-sm font-medium text-gray-900">
+                    ${formatAmount(order.order_total_amount)}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {order.assigned_courier_id ? (
+                      <>
+                        <div className="text-xs text-gray-500">{order.assigned_courier_id}</div>
+                        {order.delivery_task_status && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                            {order.delivery_task_status}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-400">Unassigned</span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => onEdit(order)}
+                      className="text-blue-600 hover:text-blue-900"
+                      title="Edit order"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => onDelete(order)}
+                      className="text-red-600 hover:text-red-900"
+                      title="Delete order"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -507,12 +573,8 @@ export default function OrdersDashboardPage() {
             ))}
           </div>
 
-          {/* Orders grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {paginatedOrders.map(order => (
-              <OrderCard key={order.order_id} order={order} onEdit={handleEdit} onDelete={handleDelete} />
-            ))}
-          </div>
+          {/* Orders table */}
+          <OrdersTable orders={paginatedOrders} onEdit={handleEdit} onDelete={handleDelete} />
 
           {/* Pagination Controls */}
           {totalPages > 1 && (
