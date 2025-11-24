@@ -171,7 +171,7 @@ export class ZeroServer {
   private getViewName(collection: string): string {
     // Map collection names to Materialize view names
     const viewMap: Record<string, string> = {
-      orders: "orders_flat_mv",
+      orders: "orders_search_source_mv",  // Use enriched view with customer/store names
       stores: "stores_flat",
       couriers: "courier_schedule_mv",
       inventory: "store_inventory_mv",

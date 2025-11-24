@@ -334,6 +334,7 @@ export class MaterializeBackend {
    */
   private transformRow(row: any, viewName: string): Record<string, any> {
     switch (viewName) {
+      case "orders_search_source_mv":
       case "orders_flat_mv":
         return {
           id: row.order_id, // Primary key for Zero
@@ -346,11 +347,14 @@ export class MaterializeBackend {
           delivery_window_end: row.delivery_window_end,
           order_total_amount: row.order_total_amount,
           customer_name: row.customer_name,
+          customer_email: row.customer_email,
           customer_address: row.customer_address,
           store_name: row.store_name,
           store_zone: row.store_zone,
+          store_address: row.store_address,
           assigned_courier_id: row.assigned_courier_id,
           delivery_task_status: row.delivery_task_status,
+          delivery_eta: row.delivery_eta,
         };
 
       case "stores_flat":
