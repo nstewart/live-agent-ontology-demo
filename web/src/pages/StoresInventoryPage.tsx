@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { freshmartApi, triplesApi, StoreInfo, StoreInventory, TripleCreate, ProductInfo } from '../api/client'
-import { Warehouse, AlertTriangle, Plus, Edit2, Trash2, X, Package } from 'lucide-react'
+import { useZeroQuery } from '../hooks/useZeroQuery'
+import { useZeroContext } from '../contexts/ZeroContext'
+import { Warehouse, AlertTriangle, Plus, Edit2, Trash2, X, Package, Wifi, WifiOff } from 'lucide-react'
 
 const storeStatuses = ['OPEN', 'LIMITED', 'CLOSED']
 
@@ -308,10 +310,48 @@ export default function StoresInventoryPage() {
   const [expandedStores, setExpandedStores] = useState<Set<string>>(new Set())
   const [viewAllInventoryStore, setViewAllInventoryStore] = useState<StoreInfo | null>(null)
 
-  const { data: stores, isLoading, error } = useQuery({
-    queryKey: ['stores'],
-    queryFn: () => freshmartApi.listStores().then(r => r.data),
+  // 🔥 ZERO WebSocket - Real-time stores and inventory data
+  const { connected: zeroConnected } = useZeroContext()
+  const { data: storesData, isLoading: storesLoading, error: storesError } = useZeroQuery<any>({
+    collection: 'stores',
   })
+  const { data: inventoryData, isLoading: inventoryLoading, error: inventoryError } = useZeroQuery<any>({
+    collection: 'inventory',
+  })
+
+  // Merge Zero store metadata with Zero inventory data
+  const stores = useMemo(() => {
+    if (!storesData) return []
+
+    // Sort stores by store_id for stable display
+    const sortedZeroStores = [...storesData].sort((a, b) => {
+      const aId = a.store_id || a.id || ''
+      const bId = b.store_id || b.id || ''
+      return aId.localeCompare(bId)
+    })
+
+    // Group inventory items by store_id
+    const inventoryByStore = new Map<string, any[]>()
+    if (inventoryData) {
+      inventoryData.forEach((item: any) => {
+        const storeId = item.store_id
+        if (!inventoryByStore.has(storeId)) {
+          inventoryByStore.set(storeId, [])
+        }
+        inventoryByStore.get(storeId)!.push(item)
+      })
+    }
+
+    // Merge stores with their inventory items
+    return sortedZeroStores.map(store => ({
+      ...store,
+      store_id: store.store_id || store.id,
+      inventory_items: inventoryByStore.get(store.store_id || store.id) || [],
+    }))
+  }, [storesData, inventoryData])
+
+  const isLoading = storesLoading || inventoryLoading
+  const error = storesError || inventoryError
 
   const { data: products = [] } = useQuery({
     queryKey: ['products'],
@@ -463,8 +503,21 @@ export default function StoresInventoryPage() {
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Stores & Inventory</h1>
-          <p className="text-gray-600">Monitor store status and inventory levels</p>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900">Stores & Inventory</h1>
+            {zeroConnected ? (
+              <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full">
+                <Wifi className="h-3 w-3" />
+                Real-time
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-full">
+                <WifiOff className="h-3 w-3" />
+                Connecting...
+              </span>
+            )}
+          </div>
+          <p className="text-gray-600">Real-time store updates with inventory data</p>
         </div>
         <button
           onClick={() => {

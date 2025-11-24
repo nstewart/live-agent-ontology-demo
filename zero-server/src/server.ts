@@ -172,7 +172,7 @@ export class ZeroServer {
     // Map collection names to Materialize view names
     const viewMap: Record<string, string> = {
       orders: "orders_flat_mv",
-      stores: "store_inventory_mv",
+      stores: "stores_flat",
       couriers: "courier_schedule_mv",
       inventory: "store_inventory_mv",
       courier_tasks: "delivery_task_mv",

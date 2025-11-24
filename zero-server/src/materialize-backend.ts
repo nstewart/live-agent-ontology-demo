@@ -247,23 +247,35 @@ export class MaterializeBackend {
           delivery_task_status: row.delivery_task_status,
         };
 
-      case "store_inventory_mv":
+      case "stores_flat":
         return {
-          id: row.store_id,
+          id: row.store_id, // Primary key for Zero
+          store_id: row.store_id, // Keep for backwards compatibility
           store_name: row.store_name,
           store_address: row.store_address,
           store_zone: row.store_zone,
-          store_status: row.store_status,
-          store_capacity_orders_per_hour: row.store_capacity_orders_per_hour,
+        };
+
+      case "store_inventory_mv":
+        return {
+          id: row.inventory_id, // Primary key for Zero
+          inventory_id: row.inventory_id,
+          store_id: row.store_id,
+          product_id: row.product_id,
+          stock_level: row.stock_level,
+          replenishment_eta: row.replenishment_eta,
+          effective_updated_at: row.effective_updated_at,
         };
 
       case "courier_schedule_mv":
         return {
-          id: row.courier_id,
+          id: row.courier_id, // Primary key for Zero
+          courier_id: row.courier_id, // Keep for backwards compatibility
           courier_name: row.courier_name,
           home_store_id: row.home_store_id,
           vehicle_type: row.vehicle_type,
           courier_status: row.courier_status,
+          tasks: row.tasks || [], // JSONB array of tasks
         };
 
       default:
