@@ -380,104 +380,133 @@ export default function CouriersSchedulePage() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCouriers.map(courier => {
-            const VehicleIcon = vehicleIcons[courier.vehicle_type || ''] || Truck
-            const homeStore = stores.find(s => s.store_id === courier.home_store_id)
-            return (
-              <div key={courier.courier_id} className="bg-white rounded-lg shadow p-4">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <VehicleIcon className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{courier.courier_name} ({courier.courier_id.replace('courier:', '')})</h3>
-                      <p className="text-sm text-gray-500">{courier.vehicle_type}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      statusColors[courier.courier_status || ''] || 'bg-gray-100'
-                    }`}>
-                      {courier.courier_status?.replace('_', ' ')}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setEditingCourier(courier)
-                        setShowCourierModal(true)
-                      }}
-                      className="p-1 text-gray-400 hover:text-blue-600"
-                      title="Edit courier"
-                    >
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setDeleteCourierConfirm(courier)}
-                      className="p-1 text-gray-400 hover:text-red-600"
-                      title="Delete courier"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Courier
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Vehicle
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Home Store
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Assigned Tasks
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredCouriers.map(courier => {
+                    const VehicleIcon = vehicleIcons[courier.vehicle_type || ''] || Truck
+                    const homeStore = stores.find(s => s.store_id === courier.home_store_id)
+                    const activeTasks = courier.tasks.filter(t => t.task_status !== 'COMPLETED')
+                    const completedTasks = courier.tasks.filter(t => t.task_status === 'COMPLETED')
 
-                <div className="text-sm text-gray-600 mb-4">
-                  <p>Home Store: {homeStore ? `${homeStore.store_name} (${courier.home_store_id})` : courier.home_store_id || 'Not assigned'}</p>
-                </div>
-
-                {/* Tasks */}
-                <div>
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">
-                    Assigned Tasks ({courier.tasks.length})
-                  </h4>
-                  {courier.tasks.length === 0 ? (
-                    <div className="flex items-center gap-2 text-gray-500 text-sm">
-                      <Coffee className="h-4 w-4" />
-                      No active tasks
-                    </div>
-                  ) : (
-                    <>
-                      <div className="space-y-2">
-                        {courier.tasks.slice(0, 5).map((task, idx) => (
-                          <div
-                            key={task.task_id || idx}
-                            className="bg-gray-50 rounded p-2 text-sm"
-                          >
-                            <div className="flex justify-between">
-                              <span className="font-medium">{task.order_id}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                task.task_status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700' :
-                                task.task_status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
-                                'bg-gray-100 text-gray-700'
-                              }`}>
-                                {task.task_status}
-                              </span>
+                    return (
+                      <tr key={courier.courier_id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-100 rounded-lg">
+                              <VehicleIcon className="h-4 w-4 text-blue-600" />
                             </div>
-                            {task.eta && (
-                              <p className="text-gray-500 text-xs mt-1">
-                                ETA: {task.eta.slice(11, 16)}
-                              </p>
-                            )}
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{courier.courier_name}</div>
+                              <div className="text-xs text-gray-400">{courier.courier_id.replace('courier:', '')}</div>
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                      {courier.tasks.length > 5 && (
-                        <button
-                          onClick={() => setViewTasksCourier(courier)}
-                          className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded border border-blue-200"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          View All {courier.tasks.length} Tasks
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            statusColors[courier.courier_status || ''] || 'bg-gray-100'
+                          }`}>
+                            {courier.courier_status?.replace('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{courier.vehicle_type}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="text-sm text-gray-900">
+                            {homeStore ? homeStore.store_name : 'Not assigned'}
+                          </div>
+                          <div className="text-xs text-gray-500">{homeStore?.store_zone}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {courier.tasks.length === 0 ? (
+                            <div className="flex items-center gap-2 text-gray-500 text-sm">
+                              <Coffee className="h-4 w-4" />
+                              <span>No active tasks</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="font-medium text-gray-900">{activeTasks.length}</span>
+                                <span className="text-gray-500">active</span>
+                                {completedTasks.length > 0 && (
+                                  <>
+                                    <span className="text-gray-300">•</span>
+                                    <span className="text-gray-500">{completedTasks.length} completed</span>
+                                  </>
+                                )}
+                              </div>
+                              {activeTasks.length > 0 && (
+                                <div className="text-xs text-gray-500">
+                                  Next: {activeTasks[0].order_id}
+                                  {activeTasks[0].eta && (
+                                    <span className="ml-1">@ {activeTasks[0].eta.slice(11, 16)}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="flex items-center justify-end gap-2">
+                            {courier.tasks.length > 0 && (
+                              <button
+                                onClick={() => setViewTasksCourier(courier)}
+                                className="text-purple-600 hover:text-purple-900"
+                                title="View all tasks"
+                              >
+                                <ExternalLink className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setEditingCourier(courier)
+                                setShowCourierModal(true)
+                              }}
+                              className="text-blue-600 hover:text-blue-900"
+                              title="Edit courier"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteCourierConfirm(courier)}
+                              className="text-red-600 hover:text-red-900"
+                              title="Delete courier"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </>
       )}
 
