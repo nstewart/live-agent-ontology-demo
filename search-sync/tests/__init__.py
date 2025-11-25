@@ -1,0 +1,1 @@
+"""Search-sync tests package."""

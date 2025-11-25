@@ -1,0 +1,15 @@
+# Database
+psycopg[binary]==3.1.18
+
+# OpenSearch
+opensearch-py==2.4.2
+
+# Settings & Validation
+pydantic==2.6.0
+pydantic-settings==2.1.0
+
+# Logging
+structlog==24.1.0
+
+# Async
+aiohttp==3.9.3
