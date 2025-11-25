@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { triplesApi, StoreInfo, StoreInventory, TripleCreate, ProductInfo } from '../api/client'
+import { triplesApi, StoreInfo, StoreInventory, TripleCreate } from '../api/client'
 import { useZero, useQuery } from '@rocicorp/zero/react'
 import { Schema } from '../schema'
 import { Warehouse, AlertTriangle, Plus, Edit2, Trash2, X, Package, Wifi, WifiOff } from 'lucide-react'
+import { InventoryFormModal, InventoryFormData } from '../components/InventoryFormModal'
 
 const storeStatuses = ['OPEN', 'LIMITED', 'CLOSED']
 
@@ -16,13 +17,6 @@ interface StoreFormData {
   store_capacity_orders_per_hour: string
 }
 
-interface InventoryFormData {
-  inventory_id: string
-  store_id: string
-  product_id: string
-  stock_level: string
-  replenishment_eta: string
-}
 
 const initialStoreForm: StoreFormData = {
   store_id: '',
@@ -33,13 +27,6 @@ const initialStoreForm: StoreFormData = {
   store_capacity_orders_per_hour: '',
 }
 
-const initialInventoryForm: InventoryFormData = {
-  inventory_id: '',
-  store_id: '',
-  product_id: '',
-  stock_level: '',
-  replenishment_eta: '',
-}
 
 function StoreFormModal({
   isOpen,
@@ -181,123 +168,6 @@ function StoreFormModal({
   )
 }
 
-function InventoryFormModal({
-  isOpen,
-  onClose,
-  inventory,
-  storeId,
-  products,
-  onSave,
-  isLoading,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  inventory?: StoreInventory
-  storeId: string
-  products: ProductInfo[]
-  onSave: (data: InventoryFormData, isEdit: boolean) => void
-  isLoading: boolean
-}) {
-  const [formData, setFormData] = useState<InventoryFormData>({ ...initialInventoryForm, store_id: storeId })
-
-  useEffect(() => {
-    if (inventory) {
-      setFormData({
-        inventory_id: inventory.inventory_id.replace('inventory:', ''),
-        store_id: inventory.store_id || storeId,
-        product_id: inventory.product_id || '',
-        stock_level: inventory.stock_level?.toString() || '',
-        replenishment_eta: inventory.replenishment_eta?.slice(0, 16) || '',
-      })
-    } else {
-      setFormData({ ...initialInventoryForm, store_id: storeId })
-    }
-  }, [inventory, storeId])
-
-  if (!isOpen) return null
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-60">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-        <div className="flex justify-between items-center p-4 border-b">
-          <h2 className="text-lg font-semibold">{inventory ? 'Edit Inventory' : 'Add Inventory Item'}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        <form
-          onSubmit={e => {
-            e.preventDefault()
-            onSave(formData, !!inventory)
-          }}
-          className="p-4 space-y-4"
-        >
-          {!inventory && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Inventory ID *</label>
-              <input
-                type="text"
-                required
-                value={formData.inventory_id}
-                onChange={e => setFormData({ ...formData, inventory_id: e.target.value })}
-                placeholder="INV-BK01-001"
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
-              />
-            </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Product *</label>
-            <select
-              required
-              value={formData.product_id}
-              onChange={e => setFormData({ ...formData, product_id: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
-            >
-              <option value="">Select a product...</option>
-              {products.map(p => (
-                <option key={p.product_id} value={p.product_id}>
-                  {p.product_name || 'Unknown'} ({p.product_id})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Stock Level *</label>
-            <input
-              type="number"
-              required
-              value={formData.stock_level}
-              onChange={e => setFormData({ ...formData, stock_level: e.target.value })}
-              placeholder="100"
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Replenishment ETA</label>
-            <input
-              type="datetime-local"
-              value={formData.replenishment_eta}
-              onChange={e => setFormData({ ...formData, replenishment_eta: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-4">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border rounded-lg hover:bg-gray-50">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >
-              {isLoading ? 'Saving...' : inventory ? 'Update' : 'Add'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
 
 export default function StoresInventoryPage() {
   const queryClient = useQueryClient()
@@ -319,9 +189,6 @@ export default function StoresInventoryPage() {
       .related('inventory', q => q.orderBy('inventory_id', 'asc'))
       .orderBy('store_id', 'asc')
   )
-
-  // Products sorted by product_id
-  const [products] = useQuery(z.query.products_mv.orderBy('product_id', 'asc'))
 
   const zeroConnected = true // Zero handles connection internally
 
@@ -663,6 +530,7 @@ export default function StoresInventoryPage() {
         isLoading={createStoreMutation.isPending || updateStoreMutation.isPending}
       />
 
+      {/* Inventory Modal - queries its own products data */}
       {editingInventory && (
         <InventoryFormModal
           isOpen={showInventoryModal}
@@ -672,7 +540,6 @@ export default function StoresInventoryPage() {
           }}
           inventory={editingInventory.inventory}
           storeId={editingInventory.storeId}
-          products={products}
           onSave={handleSaveInventory}
           isLoading={createInventoryMutation.isPending || updateInventoryMutation.isPending}
         />

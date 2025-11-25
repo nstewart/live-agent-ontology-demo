@@ -68,7 +68,7 @@ services:
           - "4848:4848"
 
   materialize-zero:
-      image: a1q3r1n/materialize-zero:0.0.1
+      image: a1q3r1n/materialize-zero:0.0.3
       container_name: materialize-zero
       depends_on:
         mz:
@@ -84,6 +84,23 @@ services:
           - "8082:8080"
       extra_hosts:
           - "host.docker.internal:host-gateway"
+
+  # Updates Zero permissions after materialize-zero creates the table
+  zero-permissions:
+      build:
+        context: .
+        dockerfile: zero-permissions/Dockerfile
+      container_name: zero-permissions
+      depends_on:
+        materialize-zero:
+          condition: service_started
+      environment:
+          MZ_HOST: ${MZ_HOST:-mz}
+          MZ_PORT: ${MZ_PORT:-6875}
+          MZ_USER: ${MZ_USER:-materialize}
+          MZ_PASSWORD: ${MZ_PASSWORD:-materialize}
+          MZ_DATABASE: ${MZ_DATABASE:-materialize}
+      restart: "no"
 
   opensearch:
     image: opensearchproject/opensearch:2.11.0
