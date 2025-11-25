@@ -42,9 +42,11 @@ class StoreInventory(BaseModel):
     replenishment_eta: Optional[str] = None
     effective_updated_at: Optional[datetime] = None
 
-    # Enriched fields
+    # Enriched fields from products
     store_name: Optional[str] = None
     product_name: Optional[str] = None
+    category: Optional[str] = None
+    perishable: Optional[bool] = None
 
 
 class CourierSchedule(BaseModel):

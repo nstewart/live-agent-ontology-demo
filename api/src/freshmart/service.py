@@ -188,7 +188,8 @@ class FreshMartService:
 
         query = f"""
             SELECT inventory_id, store_id, product_id, stock_level,
-                   replenishment_eta, effective_updated_at
+                   replenishment_eta, effective_updated_at,
+                   product_name, category, perishable
             FROM {view}
             {where_clause}
             ORDER BY store_id, product_id
@@ -206,6 +207,9 @@ class FreshMartService:
                 stock_level=row.stock_level,
                 replenishment_eta=row.replenishment_eta,
                 effective_updated_at=row.effective_updated_at,
+                product_name=row.product_name,
+                category=row.category,
+                perishable=row.perishable,
             )
             for row in rows
         ]
@@ -302,6 +306,107 @@ class FreshMartService:
                 customer_name=row.customer_name,
                 customer_email=row.customer_email,
                 customer_address=row.customer_address,
+            )
+            for row in rows
+        ]
+
+    # =========================================================================
+    # Order Line Items (Read Operations)
+    # =========================================================================
+
+    async def list_order_lines(self, order_id: str) -> list["OrderLineFlat"]:
+        """List all line items for an order using materialized view.
+
+        Args:
+            order_id: Parent order ID
+
+        Returns:
+            List of line items sorted by sequence
+        """
+        from src.freshmart.models import OrderLineFlat
+
+        # Use order_lines_flat_mv when reading from Materialize
+        # Fall back to direct triple query when reading from PostgreSQL
+        if self.use_materialize:
+            query = """
+                SELECT
+                    line_id,
+                    order_id,
+                    product_id,
+                    quantity,
+                    unit_price,
+                    line_amount,
+                    line_sequence,
+                    perishable_flag,
+                    product_name,
+                    category,
+                    effective_updated_at
+                FROM order_lines_flat_mv
+                WHERE order_id = :order_id
+                ORDER BY line_sequence
+            """
+        else:
+            # PostgreSQL fallback - query triples directly
+            order_number = order_id.split(":")[1]
+            pattern = f"orderline:{order_number}-%"
+            query = """
+                WITH line_items AS (
+                    SELECT DISTINCT subject_id AS line_id
+                    FROM triples
+                    WHERE subject_id LIKE :pattern
+                ),
+                line_data AS (
+                    SELECT
+                        li.line_id,
+                        MAX(CASE WHEN t.predicate = 'line_of_order' THEN t.object_value END) AS order_id,
+                        MAX(CASE WHEN t.predicate = 'line_product' THEN t.object_value END) AS product_id,
+                        MAX(CASE WHEN t.predicate = 'quantity' THEN t.object_value END)::INT AS quantity,
+                        MAX(CASE WHEN t.predicate = 'order_line_unit_price' THEN t.object_value END)::DECIMAL(10,2) AS unit_price,
+                        MAX(CASE WHEN t.predicate = 'line_amount' THEN t.object_value END)::DECIMAL(10,2) AS line_amount,
+                        MAX(CASE WHEN t.predicate = 'line_sequence' THEN t.object_value END)::INT AS line_sequence,
+                        MAX(CASE WHEN t.predicate = 'perishable_flag' THEN t.object_value END)::BOOLEAN AS perishable_flag,
+                        MAX(t.updated_at) AS effective_updated_at
+                    FROM line_items li
+                    LEFT JOIN triples t ON t.subject_id = li.line_id
+                    GROUP BY li.line_id
+                ),
+                products AS (
+                    SELECT
+                        subject_id AS product_id,
+                        MAX(CASE WHEN predicate = 'product_name' THEN object_value END) AS product_name,
+                        MAX(CASE WHEN predicate = 'category' THEN object_value END) AS category
+                    FROM triples
+                    WHERE subject_id LIKE 'product:%'
+                    GROUP BY subject_id
+                )
+                SELECT ld.*, p.product_name, p.category
+                FROM line_data ld
+                LEFT JOIN products p ON p.product_id = ld.product_id
+                WHERE ld.order_id = :order_id
+                ORDER BY ld.line_sequence
+            """
+
+        params = {"order_id": order_id}
+        if not self.use_materialize:
+            order_number = order_id.split(":")[1]
+            params["pattern"] = f"orderline:{order_number}-%"
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            OrderLineFlat(
+                line_id=row.line_id,
+                order_id=row.order_id,
+                product_id=row.product_id,
+                quantity=row.quantity,
+                unit_price=row.unit_price,
+                line_amount=row.line_amount,
+                line_sequence=row.line_sequence,
+                perishable_flag=row.perishable_flag,
+                product_name=row.product_name,
+                category=row.category,
+                effective_updated_at=row.effective_updated_at,
             )
             for row in rows
         ]

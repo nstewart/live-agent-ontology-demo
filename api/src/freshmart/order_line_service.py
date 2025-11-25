@@ -138,7 +138,10 @@ class OrderLineService:
         Returns:
             List of line items sorted by sequence
         """
-        # Query from triples table (will be replaced by materialized view in Issue #3)
+        # Query triples directly with product enrichment (for PostgreSQL)
+        order_number = order_id.split(":")[1]
+        pattern = f"orderline:{order_number}-%"
+
         query = """
             WITH line_items AS (
                 SELECT DISTINCT subject_id AS line_id
@@ -159,18 +162,24 @@ class OrderLineService:
                 FROM line_items li
                 LEFT JOIN triples t ON t.subject_id = li.line_id
                 GROUP BY li.line_id
+            ),
+            products AS (
+                SELECT
+                    subject_id AS product_id,
+                    MAX(CASE WHEN predicate = 'product_name' THEN object_value END) AS product_name,
+                    MAX(CASE WHEN predicate = 'category' THEN object_value END) AS category
+                FROM triples
+                WHERE subject_id LIKE 'product:%'
+                GROUP BY subject_id
             )
-            SELECT * FROM line_data
-            WHERE order_id = :order_id
-            ORDER BY line_sequence
+            SELECT ld.*, p.product_name, p.category
+            FROM line_data ld
+            LEFT JOIN products p ON p.product_id = ld.product_id
+            WHERE ld.order_id = :order_id
+            ORDER BY ld.line_sequence
         """
 
-        order_number = order_id.split(":")[1]
-        pattern = f"orderline:{order_number}-%"
-
-        result = await self.session.execute(
-            text(query), {"pattern": pattern, "order_id": order_id}
-        )
+        result = await self.session.execute(text(query), {"pattern": pattern, "order_id": order_id})
         rows = result.fetchall()
 
         return [
@@ -183,6 +192,8 @@ class OrderLineService:
                 line_amount=row.line_amount,
                 line_sequence=row.line_sequence,
                 perishable_flag=row.perishable_flag,
+                product_name=row.product_name,
+                category=row.category,
                 effective_updated_at=row.effective_updated_at,
             )
             for row in rows

@@ -282,12 +282,13 @@ async def create_order_line_items_batch(
 @router.get("/orders/{order_id:path}/line-items", response_model=list[OrderLineFlat])
 async def list_order_line_items(
     order_id: str,
-    service: OrderLineService = Depends(get_order_line_service),
+    service: FreshMartService = Depends(get_freshmart_service),
 ):
     """
     List all line items for an order.
 
     Returns line items sorted by line_sequence.
+    Uses Materialize for fast reads when available.
     """
     return await service.list_order_lines(order_id)
 

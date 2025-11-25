@@ -76,11 +76,13 @@ function OrderFormModal({
     setStore,
     clearCart,
     addItem,
-    getTotal
+    getTotal,
+    loadLineItems
   } = useShoppingCartStore()
 
+  // Load existing line items when editing
   useEffect(() => {
-    if (order) {
+    if (order && order.order_id) {
       setFormData({
         order_number: order.order_number || '',
         customer_id: order.customer_id || '',
@@ -94,12 +96,60 @@ function OrderFormModal({
       if (order.store_id) {
         setStore(order.store_id, true)
       }
-      // TODO: Load existing line items when backend API is available
+
+      // Load existing line items from API
+      Promise.all([
+        freshmartApi.listOrderLines(order.order_id).then((r: any) => {
+          console.log('Loaded line items:', r.data)
+          return r.data
+        }).catch((err: any) => {
+          console.log('Line items error (might be 404):', err.response?.status)
+          return []
+        }),
+        order.store_id ? freshmartApi.getStore(order.store_id).then((r: any) => {
+          console.log('Loaded store inventory:', r.data?.inventory_items?.length, 'items')
+          return r.data
+        }).catch((err: any) => {
+          console.error('Store loading error:', err)
+          return null
+        }) : Promise.resolve(null)
+      ]).then(([lineItems, store]) => {
+        console.log('Processing', lineItems.length, 'line items with store:', store?.store_id)
+
+        // Build inventory map for stock levels and product details
+        const inventoryMap = new Map(
+          store?.inventory_items?.map((inv: any) => [inv.product_id, inv]) || []
+        )
+        console.log('Inventory map has', inventoryMap.size, 'products')
+
+        const cartItems = lineItems.map((item: any) => {
+          const inventory = inventoryMap.get(item.product_id)
+          const productName = item.product_name || inventory?.product_name || 'Unknown Product'
+          console.log('Line item:', item.product_id, '→', productName, '(from line item:', item.product_name, ', from inventory:', inventory?.product_name, ')')
+
+          return {
+            product_id: item.product_id,
+            // Prefer product name from line item (historical), fallback to current inventory
+            product_name: productName,
+            quantity: item.quantity,
+            unit_price: parseFloat(item.unit_price?.toString() || '0'),
+            perishable_flag: item.perishable_flag ?? inventory?.perishable ?? false,
+            available_stock: inventory?.stock_level || 999, // Use actual stock or high number
+            category: item.category || inventory?.category || undefined,
+            line_amount: parseFloat(item.line_amount?.toString() || '0'),
+          }
+        })
+
+        console.log('Loading', cartItems.length, 'items into cart:', cartItems)
+        loadLineItems(cartItems)
+      }).catch((error: any) => {
+        console.error('Failed to load line items for editing:', error)
+      })
     } else {
       setFormData(initialFormData)
       clearCart()
     }
-  }, [order, setStore, clearCart])
+  }, [order, setStore, clearCart, loadLineItems])
 
   // Sync cart total with form total
   useEffect(() => {
@@ -108,6 +158,13 @@ function OrderFormModal({
       setFormData(prev => ({ ...prev, order_total_amount: total.toFixed(2) }))
     }
   }, [line_items, getTotal])
+
+  // Cleanup: clear cart when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      clearCart()
+    }
+  }, [isOpen, clearCart])
 
   if (!isOpen) return null
 
@@ -620,6 +677,7 @@ function LineItemsTable({
 
 export default function OrdersDashboardPage() {
   const queryClient = useQueryClient()
+  const { subscribe, unsubscribe } = useZeroContext()
   const [showModal, setShowModal] = useState(false)
   const [editingOrder, setEditingOrder] = useState<OrderFlat | undefined>()
   const [deleteConfirm, setDeleteConfirm] = useState<OrderFlat | null>(null)
@@ -712,6 +770,13 @@ export default function OrdersDashboardPage() {
       useShoppingCartStore.getState().clearCart()
       setShowModal(false)
       setEditingOrder(undefined)
+      // Clear line items cache so expanded rows refresh
+      setLineItemsCache(new Map())
+      // Force refresh Zero cache by resubscribing
+      setTimeout(() => {
+        unsubscribe('orders')
+        subscribe('orders')
+      }, 100)
     },
   })
 
@@ -762,11 +827,47 @@ export default function OrdersDashboardPage() {
       }
 
       await Promise.all(updates)
+
+      // Handle line items: compare cart with existing line items
+      const cartItems = useShoppingCartStore.getState().line_items
+      const existingLineItems = await freshmartApi.listOrderLines(order.order_id)
+        .then((r: any) => r.data)
+        .catch(() => [] as OrderLineFlat[])
+
+      // Find new items in cart (not in existing line items)
+      const existingProductIds = new Set(existingLineItems.map((item: any) => item.product_id))
+      const newItems = cartItems.filter((item: any) => !existingProductIds.has(item.product_id))
+
+      // Add new line items if any
+      if (newItems.length > 0) {
+        // Get next sequence number
+        const maxSequence = existingLineItems.length > 0
+          ? Math.max(...existingLineItems.map((item: any) => item.line_sequence))
+          : 0
+
+        const lineItemsToCreate = newItems.map((item: any, index: number) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          line_sequence: maxSequence + index + 1,
+          perishable_flag: item.perishable_flag,
+        }))
+
+        await freshmartApi.createOrderLinesBatch(order.order_id, lineItemsToCreate)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      useShoppingCartStore.getState().clearCart()
       setShowModal(false)
       setEditingOrder(undefined)
+      // Clear line items cache so expanded rows refresh
+      setLineItemsCache(new Map())
+      // Force refresh Zero cache by resubscribing
+      setTimeout(() => {
+        unsubscribe('orders')
+        subscribe('orders')
+      }, 100)
     },
   })
 
@@ -775,6 +876,11 @@ export default function OrdersDashboardPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       setDeleteConfirm(null)
+      // Force refresh Zero cache by resubscribing
+      setTimeout(() => {
+        unsubscribe('orders')
+        subscribe('orders')
+      }, 100)
     },
   })
 

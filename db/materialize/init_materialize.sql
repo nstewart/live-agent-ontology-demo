@@ -94,7 +94,8 @@ FROM triples
 WHERE subject_id LIKE 'order:%'
 GROUP BY subject_id;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS store_inventory_mv IN CLUSTER compute AS
+-- Base inventory view
+CREATE VIEW IF NOT EXISTS store_inventory_base AS
 SELECT
     subject_id AS inventory_id,
     MAX(CASE WHEN predicate = 'inventory_store' THEN object_value END) AS store_id,
@@ -105,6 +106,21 @@ SELECT
 FROM triples
 WHERE subject_id LIKE 'inventory:%'
 GROUP BY subject_id;
+
+-- Materialized view with product enrichment
+CREATE MATERIALIZED VIEW IF NOT EXISTS store_inventory_mv IN CLUSTER compute AS
+SELECT
+    inv.inventory_id,
+    inv.store_id,
+    inv.product_id,
+    inv.stock_level,
+    inv.replenishment_eta,
+    inv.effective_updated_at,
+    p.product_name,
+    p.category,
+    p.perishable
+FROM store_inventory_base inv
+LEFT JOIN products_flat p ON p.product_id = inv.product_id;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS orders_search_source_mv IN CLUSTER compute AS
 SELECT

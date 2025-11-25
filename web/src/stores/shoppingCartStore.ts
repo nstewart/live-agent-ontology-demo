@@ -158,10 +158,10 @@ export const useShoppingCartStore = create<ShoppingCartState>()(
     }),
     {
       name: 'shopping-cart-storage',
-      // Only persist store_id and line_items, not functions
+      // Only persist store_id, not line_items (they should be ephemeral per session)
       partialize: (state) => ({
         store_id: state.store_id,
-        line_items: state.line_items,
+        line_items: [], // Don't persist line items to avoid confusion
       }),
     }
   )
