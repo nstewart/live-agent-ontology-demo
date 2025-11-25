@@ -24,6 +24,8 @@ import {
   ChevronRight,
   ChevronDown,
   Snowflake,
+  Filter,
+  X,
 } from "lucide-react";
 import { useShoppingCartStore } from "../stores/shoppingCartStore";
 import {
@@ -337,17 +339,61 @@ export default function OrdersDashboardPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
 
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [storeFilter, setStoreFilter] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
   // 🔥 ZERO - Real-time data using orders_with_lines_mv (includes embedded line items)
   const z = useZero<Schema>();
 
-  // Orders with embedded line items, sorted by order_number
-  const [ordersWithLinesData] = useQuery(
-    z.query.orders_with_lines_mv.orderBy("order_number", "asc")
-  );
+  // Get stores for filter dropdown
+  const [storesData] = useQuery(z.query.stores_mv.orderBy("store_name", "asc"));
 
-  // Also get orders_search_source_mv for customer/store names
+  // Build filtered queries inline
+  let ordersWithLinesQuery = z.query.orders_with_lines_mv;
+  let ordersSearchQuery = z.query.orders_search_source_mv;
+
+  if (statusFilter) {
+    ordersWithLinesQuery = ordersWithLinesQuery.where(
+      "order_status",
+      "=",
+      statusFilter
+    );
+    ordersSearchQuery = ordersSearchQuery.where(
+      "order_status",
+      "=",
+      statusFilter
+    );
+  }
+  if (storeFilter) {
+    ordersWithLinesQuery = ordersWithLinesQuery.where(
+      "store_id",
+      "=",
+      storeFilter
+    );
+    ordersSearchQuery = ordersSearchQuery.where("store_id", "=", storeFilter);
+  }
+  if (searchQuery.trim()) {
+    const pattern = `%${searchQuery.trim()}%`;
+    ordersWithLinesQuery = ordersWithLinesQuery.where(
+      "order_number",
+      "ILIKE",
+      pattern
+    );
+    ordersSearchQuery = ordersSearchQuery.where(
+      "order_number",
+      "ILIKE",
+      pattern
+    );
+  }
+  console.log(ordersWithLinesQuery);
+
+  const [ordersWithLinesData] = useQuery(
+    ordersWithLinesQuery.orderBy("order_number", "asc")
+  );
   const [ordersSearchData] = useQuery(
-    z.query.orders_search_source_mv.orderBy("order_number", "asc")
+    ordersSearchQuery.orderBy("order_number", "asc")
   );
 
   // Merge orders data: combine line items from orders_with_lines_mv with names from orders_search_source_mv
@@ -381,6 +427,15 @@ export default function OrdersDashboardPage() {
       };
     });
   }, [ordersWithLinesData, ordersSearchData]);
+
+  // Check if any filters are active
+  const hasActiveFilters = statusFilter || storeFilter || searchQuery;
+
+  const clearFilters = () => {
+    setStatusFilter("");
+    setStoreFilter("");
+    setSearchQuery("");
+  };
 
   // Track last update time for visual feedback
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
@@ -716,6 +771,82 @@ export default function OrdersDashboardPage() {
           <Plus className="h-4 w-4" />
           Create Order
         </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Filter className="h-4 w-4" />
+            Filters
+          </div>
+
+          {/* Search */}
+          <div className="flex-1 min-w-[200px] max-w-xs">
+            <input
+              type="text"
+              placeholder="Search order #..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+            />
+          </div>
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          >
+            <option value="">All Statuses</option>
+            {statusOrder.map((status) => (
+              <option key={status} value={status}>
+                {status.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+
+          {/* Store Filter */}
+          <select
+            value={storeFilter}
+            onChange={(e) => {
+              setStoreFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          >
+            <option value="">All Stores</option>
+            {storesData.map((store) => (
+              <option key={store.store_id} value={store.store_id}>
+                {store.store_name || store.store_id}
+              </option>
+            ))}
+          </select>
+
+          {/* Clear Filters */}
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <X className="h-4 w-4" />
+              Clear
+            </button>
+          )}
+
+          {/* Active filter count */}
+          {hasActiveFilters && (
+            <span className="text-xs text-gray-500">
+              Showing {orders.length} orders
+            </span>
+          )}
+        </div>
       </div>
 
       {isLoading && (
