@@ -29,7 +29,11 @@ async def search_orders(
         limit: Maximum number of results to return (default 10)
 
     Returns:
-        List of matching orders with details
+        List of matching orders with full details including:
+        - Customer and store information
+        - Order status and delivery windows
+        - Line items with product names, quantities, and prices
+        - Line item count and perishable flags
     """
     settings = get_settings()
 
@@ -98,6 +102,9 @@ async def search_orders(
                     "delivery_window_start": hit["_source"].get("delivery_window_start"),
                     "delivery_window_end": hit["_source"].get("delivery_window_end"),
                     "order_total_amount": hit["_source"].get("order_total_amount"),
+                    "line_items": hit["_source"].get("line_items", []),
+                    "line_item_count": hit["_source"].get("line_item_count", 0),
+                    "has_perishable_items": hit["_source"].get("has_perishable_items"),
                     "score": hit.get("_score"),
                 }
                 for hit in hits
