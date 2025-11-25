@@ -11,7 +11,7 @@ INSERT INTO ontology_classes (class_name, prefix, description) VALUES
     ('Product', 'product', 'A product available for sale'),
     ('InventoryItem', 'inventory', 'Store-product inventory record'),
     ('Order', 'order', 'A customer order'),
-    ('OrderLine', 'order_line', 'A line item within an order'),
+    ('OrderLine', 'orderline', 'A line item within an order'),
     ('Courier', 'courier', 'A delivery courier'),
     ('DeliveryTask', 'task', 'A delivery task assigned to a courier')
 ON CONFLICT (class_name) DO NOTHING;
@@ -174,7 +174,22 @@ FROM ontology_classes WHERE class_name = 'OrderLine'
 ON CONFLICT (prop_name) DO NOTHING;
 
 INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
-SELECT 'line_amount', id, 'float', NULL, FALSE, TRUE, 'Line total amount'
+SELECT 'unit_price', id, 'float', NULL, FALSE, TRUE, 'Unit price at order time (price snapshot)'
+FROM ontology_classes WHERE class_name = 'OrderLine'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'line_amount', id, 'float', NULL, FALSE, TRUE, 'Line total amount (quantity * unit_price)'
+FROM ontology_classes WHERE class_name = 'OrderLine'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'line_sequence', id, 'int', NULL, FALSE, TRUE, 'Display sequence within order'
+FROM ontology_classes WHERE class_name = 'OrderLine'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'perishable_flag', id, 'bool', NULL, FALSE, TRUE, 'Denormalized perishable flag from product for performance'
 FROM ontology_classes WHERE class_name = 'OrderLine'
 ON CONFLICT (prop_name) DO NOTHING;
 

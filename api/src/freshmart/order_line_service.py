@@ -1,0 +1,341 @@
+"""Order Line service for CRUD operations on line items."""
+
+from decimal import Decimal
+from typing import Optional
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.freshmart.models import OrderLineCreate, OrderLineFlat, OrderLineUpdate
+from src.triples.models import TripleCreate
+from src.triples.service import TripleService
+
+
+class OrderLineService:
+    """Service for managing order line items with transactional integrity."""
+
+    def __init__(self, session: AsyncSession):
+        """Initialize service with database session."""
+        self.session = session
+        self.triple_service = TripleService(session, validate=True)
+
+    def _generate_line_id(self, order_id: str, sequence: int) -> str:
+        """Generate line item ID from order ID and sequence.
+
+        Args:
+            order_id: Order ID (e.g., 'order:FM-1001')
+            sequence: Line sequence number (1, 2, 3, ...)
+
+        Returns:
+            Line ID in format 'orderline:FM-1001-001'
+        """
+        order_number = order_id.split(":")[1]
+        return f"orderline:{order_number}-{sequence:03d}"
+
+    def _create_line_item_triples(
+        self, order_id: str, sequence: int, line_item: OrderLineCreate
+    ) -> list[TripleCreate]:
+        """Generate triple records for a line item.
+
+        Args:
+            order_id: Parent order ID
+            sequence: Line sequence number
+            line_item: Line item data
+
+        Returns:
+            List of TripleCreate objects
+        """
+        line_id = self._generate_line_id(order_id, sequence)
+        line_amount = line_item.quantity * line_item.unit_price
+
+        return [
+            TripleCreate(
+                subject_id=line_id,
+                predicate="line_of_order",
+                object_value=order_id,
+                object_type="entity_ref",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="line_product",
+                object_value=line_item.product_id,
+                object_type="entity_ref",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="quantity",
+                object_value=str(line_item.quantity),
+                object_type="int",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="unit_price",
+                object_value=str(line_item.unit_price),
+                object_type="float",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="line_amount",
+                object_value=str(line_amount),
+                object_type="float",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="line_sequence",
+                object_value=str(sequence),
+                object_type="int",
+            ),
+            TripleCreate(
+                subject_id=line_id,
+                predicate="perishable_flag",
+                object_value=str(line_item.perishable_flag).lower(),
+                object_type="bool",
+            ),
+        ]
+
+    async def create_line_items_batch(
+        self, order_id: str, line_items: list[OrderLineCreate]
+    ) -> list[OrderLineFlat]:
+        """Create multiple line items for an order in a single transaction.
+
+        Args:
+            order_id: Parent order ID
+            line_items: List of line items to create
+
+        Returns:
+            List of created line items
+
+        Raises:
+            ValueError: If line_sequence values are not unique
+            TripleValidationError: If triples fail ontology validation
+        """
+        # Validate unique sequences
+        sequences = [item.line_sequence for item in line_items]
+        if len(sequences) != len(set(sequences)):
+            raise ValueError("line_sequence values must be unique within an order")
+
+        # Sort by sequence for consistent ordering
+        sorted_items = sorted(line_items, key=lambda x: x.line_sequence)
+
+        # Generate all triples
+        all_triples = []
+        for item in sorted_items:
+            triples = self._create_line_item_triples(order_id, item.line_sequence, item)
+            all_triples.extend(triples)
+
+        # Create all triples in batch (validates and inserts in single transaction)
+        await self.triple_service.create_triples_batch(all_triples)
+
+        # Return created line items
+        return await self.list_order_lines(order_id)
+
+    async def list_order_lines(self, order_id: str) -> list[OrderLineFlat]:
+        """List all line items for an order.
+
+        Args:
+            order_id: Parent order ID
+
+        Returns:
+            List of line items sorted by sequence
+        """
+        # Query from triples table (will be replaced by materialized view in Issue #3)
+        query = """
+            WITH line_items AS (
+                SELECT DISTINCT subject_id AS line_id
+                FROM triples
+                WHERE subject_id LIKE :pattern
+            ),
+            line_data AS (
+                SELECT
+                    li.line_id,
+                    MAX(CASE WHEN t.predicate = 'line_of_order' THEN t.object_value END) AS order_id,
+                    MAX(CASE WHEN t.predicate = 'line_product' THEN t.object_value END) AS product_id,
+                    MAX(CASE WHEN t.predicate = 'quantity' THEN t.object_value END)::INT AS quantity,
+                    MAX(CASE WHEN t.predicate = 'unit_price' THEN t.object_value END)::DECIMAL(10,2) AS unit_price,
+                    MAX(CASE WHEN t.predicate = 'line_amount' THEN t.object_value END)::DECIMAL(10,2) AS line_amount,
+                    MAX(CASE WHEN t.predicate = 'line_sequence' THEN t.object_value END)::INT AS line_sequence,
+                    MAX(CASE WHEN t.predicate = 'perishable_flag' THEN t.object_value END)::BOOLEAN AS perishable_flag,
+                    MAX(t.updated_at) AS effective_updated_at
+                FROM line_items li
+                LEFT JOIN triples t ON t.subject_id = li.line_id
+                GROUP BY li.line_id
+            )
+            SELECT * FROM line_data
+            WHERE order_id = :order_id
+            ORDER BY line_sequence
+        """
+
+        order_number = order_id.split(":")[1]
+        pattern = f"orderline:{order_number}-%"
+
+        result = await self.session.execute(
+            text(query), {"pattern": pattern, "order_id": order_id}
+        )
+        rows = result.fetchall()
+
+        return [
+            OrderLineFlat(
+                line_id=row.line_id,
+                order_id=row.order_id,
+                product_id=row.product_id,
+                quantity=row.quantity,
+                unit_price=row.unit_price,
+                line_amount=row.line_amount,
+                line_sequence=row.line_sequence,
+                perishable_flag=row.perishable_flag,
+                effective_updated_at=row.effective_updated_at,
+            )
+            for row in rows
+        ]
+
+    async def get_line_item(self, line_id: str) -> Optional[OrderLineFlat]:
+        """Get a single line item by ID.
+
+        Args:
+            line_id: Line item ID
+
+        Returns:
+            Line item or None if not found
+        """
+        query = """
+            SELECT
+                subject_id AS line_id,
+                MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+                MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
+                MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
+                MAX(CASE WHEN predicate = 'unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+                MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
+                MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
+                MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
+                MAX(updated_at) AS effective_updated_at
+            FROM triples
+            WHERE subject_id = :line_id
+            GROUP BY subject_id
+        """
+
+        result = await self.session.execute(text(query), {"line_id": line_id})
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return OrderLineFlat(
+            line_id=row.line_id,
+            order_id=row.order_id,
+            product_id=row.product_id,
+            quantity=row.quantity,
+            unit_price=row.unit_price,
+            line_amount=row.line_amount,
+            line_sequence=row.line_sequence,
+            perishable_flag=row.perishable_flag,
+            effective_updated_at=row.effective_updated_at,
+        )
+
+    async def update_line_item(
+        self, line_id: str, updates: OrderLineUpdate
+    ) -> Optional[OrderLineFlat]:
+        """Update a line item.
+
+        Args:
+            line_id: Line item ID
+            updates: Fields to update
+
+        Returns:
+            Updated line item or None if not found
+
+        Raises:
+            ValueError: If line item not found
+        """
+        # Get current line item
+        current = await self.get_line_item(line_id)
+        if not current:
+            raise ValueError(f"Line item {line_id} not found")
+
+        # Apply updates
+        new_quantity = updates.quantity if updates.quantity is not None else current.quantity
+        new_unit_price = (
+            updates.unit_price if updates.unit_price is not None else current.unit_price
+        )
+        new_sequence = (
+            updates.line_sequence if updates.line_sequence is not None else current.line_sequence
+        )
+        new_line_amount = new_quantity * new_unit_price
+
+        # Update triples
+        if updates.quantity is not None:
+            await self.session.execute(
+                text("""
+                    UPDATE triples
+                    SET object_value = :value, updated_at = NOW()
+                    WHERE subject_id = :line_id AND predicate = 'quantity'
+                """),
+                {"line_id": line_id, "value": str(new_quantity)},
+            )
+
+        if updates.unit_price is not None:
+            await self.session.execute(
+                text("""
+                    UPDATE triples
+                    SET object_value = :value, updated_at = NOW()
+                    WHERE subject_id = :line_id AND predicate = 'unit_price'
+                """),
+                {"line_id": line_id, "value": str(new_unit_price)},
+            )
+
+        if updates.line_sequence is not None:
+            await self.session.execute(
+                text("""
+                    UPDATE triples
+                    SET object_value = :value, updated_at = NOW()
+                    WHERE subject_id = :line_id AND predicate = 'line_sequence'
+                """),
+                {"line_id": line_id, "value": str(new_sequence)},
+            )
+
+        # Always update line_amount if quantity or unit_price changed
+        if updates.quantity is not None or updates.unit_price is not None:
+            await self.session.execute(
+                text("""
+                    UPDATE triples
+                    SET object_value = :value, updated_at = NOW()
+                    WHERE subject_id = :line_id AND predicate = 'line_amount'
+                """),
+                {"line_id": line_id, "value": str(new_line_amount)},
+            )
+
+        # Return updated item
+        return await self.get_line_item(line_id)
+
+    async def delete_line_item(self, line_id: str) -> bool:
+        """Delete a line item.
+
+        Args:
+            line_id: Line item ID
+
+        Returns:
+            True if deleted, False if not found
+        """
+        result = await self.session.execute(
+            text("DELETE FROM triples WHERE subject_id = :line_id"),
+            {"line_id": line_id},
+        )
+        return result.rowcount > 0
+
+    async def delete_order_lines(self, order_id: str) -> int:
+        """Delete all line items for an order (cascade delete).
+
+        Args:
+            order_id: Parent order ID
+
+        Returns:
+            Number of line items deleted
+        """
+        order_number = order_id.split(":")[1]
+        pattern = f"orderline:{order_number}-%"
+
+        result = await self.session.execute(
+            text("DELETE FROM triples WHERE subject_id LIKE :pattern"),
+            {"pattern": pattern},
+        )
+        # Each line item has 7 triples, so divide by 7
+        return result.rowcount // 7

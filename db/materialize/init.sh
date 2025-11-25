@@ -248,6 +248,107 @@ FROM triples
 WHERE subject_id LIKE 'product:%'
 GROUP BY subject_id;" || true
 
+echo "Creating order line views..."
+
+# Order lines base view
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS order_lines_base AS
+SELECT
+    subject_id AS line_id,
+    MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+    MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
+    MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
+    MAX(CASE WHEN predicate = 'unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+    MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
+    MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
+    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
+    MAX(updated_at) AS effective_updated_at
+FROM triples
+WHERE subject_id LIKE 'orderline:%'
+GROUP BY subject_id;" || true
+
+# Products flat view for order lines
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS products_flat AS
+SELECT
+    subject_id AS product_id,
+    MAX(CASE WHEN predicate = 'product_name' THEN object_value END) AS product_name,
+    MAX(CASE WHEN predicate = 'category' THEN object_value END) AS category,
+    MAX(CASE WHEN predicate = 'unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+    MAX(CASE WHEN predicate = 'perishable' THEN object_value END)::BOOLEAN AS perishable,
+    MAX(CASE WHEN predicate = 'unit_weight_grams' THEN object_value END)::INT AS unit_weight_grams,
+    MAX(updated_at) AS effective_updated_at
+FROM triples
+WHERE subject_id LIKE 'product:%'
+GROUP BY subject_id;" || true
+
+# Order lines flat materialized view with product enrichment
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
+SELECT
+    ol.line_id,
+    ol.order_id,
+    ol.product_id,
+    ol.quantity,
+    ol.unit_price,
+    ol.line_amount,
+    ol.line_sequence,
+    ol.perishable_flag,
+    p.product_name,
+    p.category,
+    p.unit_price AS current_product_price,
+    p.unit_weight_grams,
+    ol.effective_updated_at
+FROM order_lines_base ol
+LEFT JOIN products_flat p ON p.product_id = ol.product_id;" || true
+
+# Orders with aggregated line items
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS orders_with_lines_mv IN CLUSTER compute AS
+SELECT
+    o.order_id,
+    o.order_number,
+    o.order_status,
+    o.store_id,
+    o.customer_id,
+    o.delivery_window_start,
+    o.delivery_window_end,
+    o.order_total_amount,
+    o.effective_updated_at,
+    COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'line_id', ol.line_id,
+                'product_id', ol.product_id,
+                'product_name', ol.product_name,
+                'category', ol.category,
+                'quantity', ol.quantity,
+                'unit_price', ol.unit_price,
+                'line_amount', ol.line_amount,
+                'line_sequence', ol.line_sequence,
+                'perishable_flag', ol.perishable_flag,
+                'unit_weight_grams', ol.unit_weight_grams
+            ) ORDER BY ol.line_sequence
+        ) FILTER (WHERE ol.line_id IS NOT NULL),
+        '[]'::jsonb
+    ) AS line_items,
+    COUNT(ol.line_id) AS line_item_count,
+    SUM(ol.line_amount) AS computed_total,
+    BOOL_OR(ol.perishable_flag) AS has_perishable_items,
+    SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0)::DECIMAL / 1000.0) AS total_weight_kg
+FROM orders_flat_mv o
+LEFT JOIN order_lines_flat_mv ol ON ol.order_id = o.order_id
+GROUP BY
+    o.order_id,
+    o.order_number,
+    o.order_status,
+    o.store_id,
+    o.customer_id,
+    o.delivery_window_start,
+    o.delivery_window_end,
+    o.order_total_amount,
+    o.effective_updated_at;" || true
+
 echo "Creating indexes IN CLUSTER serving on materialized views..."
 
 # Create indexes in serving cluster on materialized views
@@ -258,6 +359,13 @@ psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS c
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS stores_idx IN CLUSTER serving ON stores_mv (store_id);" || true
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS customers_idx IN CLUSTER serving ON customers_mv (customer_id);" || true
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS products_idx IN CLUSTER serving ON products_mv (product_id);" || true
+
+# Order line indexes
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_order_id_idx IN CLUSTER serving ON order_lines_flat_mv (order_id);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_product_id_idx IN CLUSTER serving ON order_lines_flat_mv (product_id);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_order_sequence_idx IN CLUSTER serving ON order_lines_flat_mv (order_id, line_sequence);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_idx IN CLUSTER serving ON orders_with_lines_mv (order_id);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_status_idx IN CLUSTER serving ON orders_with_lines_mv (order_status, effective_updated_at DESC);" || true
 
 echo "Verifying three-tier setup..."
 echo ""

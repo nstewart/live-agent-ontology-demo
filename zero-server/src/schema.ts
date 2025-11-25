@@ -90,6 +90,30 @@ export interface Schema {
       };
       primaryKey: ["id"];
     };
+
+    order_lines: {
+      tableName: "order_lines";
+      columns: {
+        id: { type: "string" }; // line_id
+        order_id: { type: "string" };
+        product_id: { type: "string" };
+        product_name: { type: "string | null" };
+        quantity: { type: "number" };
+        unit_price: { type: "number" };
+        line_amount: { type: "number" };
+        line_sequence: { type: "number" };
+        perishable_flag: { type: "boolean" };
+        effective_updated_at: { type: "string" };
+      };
+      primaryKey: ["id"];
+      relationships: {
+        order: {
+          sourceField: "order_id";
+          destTable: "orders";
+          destField: "id";
+        };
+      };
+    };
   };
 }
 

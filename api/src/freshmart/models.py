@@ -112,3 +112,55 @@ class ProductInfo(BaseModel):
     category: Optional[str] = None
     unit_price: Optional[Decimal] = None
     perishable: Optional[bool] = None
+
+
+class OrderLineFlat(BaseModel):
+    """Flattened order line item view."""
+
+    line_id: str
+    order_id: Optional[str] = None
+    product_id: Optional[str] = None
+    quantity: Optional[int] = None
+    unit_price: Optional[Decimal] = None
+    line_amount: Optional[Decimal] = None
+    line_sequence: Optional[int] = None
+    perishable_flag: Optional[bool] = None
+    effective_updated_at: Optional[datetime] = None
+
+    # Enriched fields from product
+    product_name: Optional[str] = None
+    category: Optional[str] = None
+
+
+class OrderLineCreate(BaseModel):
+    """Request model for creating an order line item."""
+
+    product_id: str = Field(..., description="Product ID (e.g., product:PROD-001)")
+    quantity: int = Field(..., gt=0, description="Quantity ordered")
+    unit_price: Decimal = Field(..., gt=0, description="Unit price at order time")
+    line_sequence: int = Field(..., gt=0, description="Display sequence within order")
+    perishable_flag: bool = Field(..., description="Perishable flag from product")
+
+
+class OrderLineUpdate(BaseModel):
+    """Request model for updating an order line item."""
+
+    quantity: Optional[int] = Field(None, gt=0, description="New quantity")
+    unit_price: Optional[Decimal] = Field(None, gt=0, description="New unit price")
+    line_sequence: Optional[int] = Field(None, gt=0, description="New sequence")
+
+
+class OrderLineBatchCreate(BaseModel):
+    """Request model for batch creating order line items."""
+
+    line_items: list[OrderLineCreate] = Field(..., min_length=1, max_length=100, description="Line items to create")
+
+
+class OrderWithLinesFlat(OrderFlat):
+    """Order with aggregated line items."""
+
+    line_items: list[dict] = Field(default_factory=list, description="Line items as JSONB array")
+    line_item_count: Optional[int] = Field(None, description="Number of line items")
+    computed_total: Optional[Decimal] = Field(None, description="Computed total from line items")
+    has_perishable_items: Optional[bool] = Field(None, description="Whether order contains perishable items")
+    total_weight_kg: Optional[Decimal] = Field(None, description="Total weight in kg")

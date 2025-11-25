@@ -14,11 +14,16 @@ from src.freshmart.models import (
     CustomerInfo,
     OrderFilter,
     OrderFlat,
+    OrderLineBatchCreate,
+    OrderLineFlat,
+    OrderLineUpdate,
     ProductInfo,
     StoreInfo,
     StoreInventory,
 )
+from src.freshmart.order_line_service import OrderLineService
 from src.freshmart.service import FreshMartService
+from src.triples.service import TripleValidationError
 
 router = APIRouter(prefix="/freshmart", tags=["FreshMart Operations"])
 
@@ -53,6 +58,23 @@ async def get_freshmart_service(session: AsyncSession = Depends(get_session)) ->
     """Dependency to get FreshMart service."""
     settings = get_settings()
     return FreshMartService(session, use_materialize=settings.use_materialize_for_reads)
+
+
+async def get_pg_write_session() -> AsyncSession:
+    """Dependency to get PostgreSQL session for write operations."""
+    factory = get_pg_session_factory()
+    async with factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def get_order_line_service(session: AsyncSession = Depends(get_pg_write_session)) -> OrderLineService:
+    """Dependency to get OrderLine service."""
+    return OrderLineService(session)
 
 
 # =============================================================================
@@ -202,3 +224,131 @@ async def get_courier(courier_id: str, service: FreshMartService = Depends(get_f
     if not courier:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Courier not found")
     return courier
+
+
+# =============================================================================
+# Order Line Items
+# =============================================================================
+
+
+@router.post("/orders/{order_id:path}/line-items/batch", response_model=list[OrderLineFlat], status_code=status.HTTP_201_CREATED)
+async def create_order_line_items_batch(
+    order_id: str,
+    data: OrderLineBatchCreate,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """
+    Create multiple line items for an order in a single transaction.
+
+    Accepts an array of line items with auto-incrementing sequences.
+    Validates line_sequence uniqueness and ontology compliance.
+
+    Example:
+    ```json
+    {
+      "line_items": [
+        {
+          "product_id": "product:PROD-001",
+          "quantity": 2,
+          "unit_price": 12.50,
+          "line_sequence": 1,
+          "perishable_flag": true
+        },
+        {
+          "product_id": "product:PROD-002",
+          "quantity": 1,
+          "unit_price": 25.00,
+          "line_sequence": 2,
+          "perishable_flag": false
+        }
+      ]
+    }
+    ```
+    """
+    try:
+        return await service.create_line_items_batch(order_id, data.line_items)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except TripleValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Triple validation failed",
+                "errors": [err.model_dump() for err in e.validation_result.errors],
+            },
+        )
+
+
+@router.get("/orders/{order_id:path}/line-items", response_model=list[OrderLineFlat])
+async def list_order_line_items(
+    order_id: str,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """
+    List all line items for an order.
+
+    Returns line items sorted by line_sequence.
+    """
+    return await service.list_order_lines(order_id)
+
+
+@router.get("/orders/{order_id:path}/line-items/{line_id:path}", response_model=OrderLineFlat)
+async def get_order_line_item(
+    order_id: str,
+    line_id: str,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """Get a single line item by ID."""
+    line_item = await service.get_line_item(line_id)
+    if not line_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found")
+    if line_item.order_id != order_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Line item does not belong to this order")
+    return line_item
+
+
+@router.put("/orders/{order_id:path}/line-items/{line_id:path}", response_model=OrderLineFlat)
+async def update_order_line_item(
+    order_id: str,
+    line_id: str,
+    data: OrderLineUpdate,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """
+    Update a line item.
+
+    Can update quantity, unit_price, or line_sequence.
+    line_amount is automatically recalculated.
+    """
+    try:
+        updated = await service.update_line_item(line_id, data)
+        if updated.order_id != order_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Line item does not belong to this order",
+            )
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete("/orders/{order_id:path}/line-items/{line_id:path}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_order_line_item(
+    order_id: str,
+    line_id: str,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """Delete a line item."""
+    # Verify line item belongs to order
+    line_item = await service.get_line_item(line_id)
+    if not line_item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found")
+    if line_item.order_id != order_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Line item does not belong to this order",
+        )
+
+    deleted = await service.delete_line_item(line_id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found")

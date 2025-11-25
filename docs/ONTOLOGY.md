@@ -96,12 +96,33 @@ A customer order for delivery.
 
 A line item within an order.
 
+**ID Format**: `orderline:{order_number}-{sequence}` (e.g., `orderline:FM-1001-001`)
+
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | line_of_order | Order (ref) | Yes | Parent order |
 | line_product | Product (ref) | Yes | Product |
 | quantity | int | Yes | Quantity ordered |
-| line_amount | float | Yes | Line total |
+| unit_price | float | Yes | Unit price at order time (price snapshot) |
+| line_amount | float | Yes | Line total (quantity * unit_price) |
+| line_sequence | int | Yes | Display sequence within order |
+| perishable_flag | bool | Yes | Denormalized perishable flag from product |
+
+**Example**:
+```json
+{
+  "subject_id": "orderline:FM-1001-001",
+  "triples": [
+    {"predicate": "line_of_order", "object_value": "order:FM-1001", "object_type": "entity_ref"},
+    {"predicate": "line_product", "object_value": "product:PROD-001", "object_type": "entity_ref"},
+    {"predicate": "quantity", "object_value": "2", "object_type": "int"},
+    {"predicate": "unit_price", "object_value": "12.50", "object_type": "float"},
+    {"predicate": "line_amount", "object_value": "25.00", "object_type": "float"},
+    {"predicate": "line_sequence", "object_value": "1", "object_type": "int"},
+    {"predicate": "perishable_flag", "object_value": "true", "object_type": "bool"}
+  ]
+}
+```
 
 ### Courier
 
