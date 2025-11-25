@@ -834,11 +834,37 @@ export default function OrdersDashboardPage() {
         .then((r: any) => r.data)
         .catch(() => [] as OrderLineFlat[])
 
-      // Find new items in cart (not in existing line items)
-      const existingProductIds = new Set(existingLineItems.map((item: any) => item.product_id))
-      const newItems = cartItems.filter((item: any) => !existingProductIds.has(item.product_id))
+      // Build maps for easier lookup
+      const existingByProductId = new Map(existingLineItems.map((item: any) => [item.product_id, item]))
+      const cartByProductId = new Map(cartItems.map((item: any) => [item.product_id, item]))
 
-      // Add new line items if any
+      const lineItemOperations: Promise<any>[] = []
+
+      // 1. Update quantities of existing items that changed
+      for (const existingItem of existingLineItems) {
+        const cartItem = cartByProductId.get(existingItem.product_id)
+        if (cartItem && cartItem.quantity !== existingItem.quantity) {
+          console.log(`Updating line item ${existingItem.line_id} quantity from ${existingItem.quantity} to ${cartItem.quantity}`)
+          lineItemOperations.push(
+            freshmartApi.updateOrderLine(order.order_id, existingItem.line_id, {
+              quantity: cartItem.quantity
+            })
+          )
+        }
+      }
+
+      // 2. Delete items removed from cart
+      for (const existingItem of existingLineItems) {
+        if (!cartByProductId.has(existingItem.product_id)) {
+          console.log(`Deleting line item ${existingItem.line_id} for product ${existingItem.product_id}`)
+          lineItemOperations.push(
+            freshmartApi.deleteOrderLine(order.order_id, existingItem.line_id)
+          )
+        }
+      }
+
+      // 3. Add new items in cart (not in existing line items)
+      const newItems = cartItems.filter((item: any) => !existingByProductId.has(item.product_id))
       if (newItems.length > 0) {
         // Get next sequence number
         const maxSequence = existingLineItems.length > 0
@@ -853,7 +879,15 @@ export default function OrdersDashboardPage() {
           perishable_flag: item.perishable_flag,
         }))
 
-        await freshmartApi.createOrderLinesBatch(order.order_id, lineItemsToCreate)
+        console.log(`Creating ${newItems.length} new line items`)
+        lineItemOperations.push(
+          freshmartApi.createOrderLinesBatch(order.order_id, lineItemsToCreate)
+        )
+      }
+
+      // Execute all line item operations
+      if (lineItemOperations.length > 0) {
+        await Promise.all(lineItemOperations)
       }
     },
     onSuccess: () => {

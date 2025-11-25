@@ -214,7 +214,7 @@ class OrderLineService:
                 MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
                 MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
                 MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
-                MAX(CASE WHEN predicate = 'unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+                MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
                 MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
                 MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
                 MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
@@ -288,7 +288,7 @@ class OrderLineService:
                 text("""
                     UPDATE triples
                     SET object_value = :value, updated_at = NOW()
-                    WHERE subject_id = :line_id AND predicate = 'unit_price'
+                    WHERE subject_id = :line_id AND predicate = 'order_line_unit_price'
                 """),
                 {"line_id": line_id, "value": str(new_unit_price)},
             )
