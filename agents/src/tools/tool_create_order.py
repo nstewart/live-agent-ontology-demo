@@ -20,12 +20,15 @@ async def create_order(
     """
     Create a new order for a customer in FreshMart.
 
-    IMPORTANT: Orders are ALWAYS created in the CREATED state initially.
+    IMPORTANT:
+    - Orders are ALWAYS created in the CREATED state initially.
+    - This tool automatically validates that items are available in the store's inventory
+    - Only items that are in stock will be added to the order
+    - Items not available will be reported but won't prevent order creation
 
     Use this tool after:
     1. Customer has been created (or exists)
-    2. Items have been confirmed via search_inventory
-    3. Customer has approved the order
+    2. Customer has approved the order
 
     Args:
         customer_id: The customer placing the order (e.g., "customer:abc123")
@@ -35,7 +38,7 @@ async def create_order(
         delivery_window_hours: Hours from now for delivery window (default: 2)
 
     Returns:
-        Order information including order_id, order_number, and total_amount
+        Order information including order_id, order_number, total_amount, and inventory validation details
 
     Example:
         create_order(
@@ -54,6 +57,88 @@ async def create_order(
             "success": False,
             "error": "Cannot create order without items",
         }
+
+    # Validate items against store inventory
+    async with httpx.AsyncClient() as client:
+        try:
+            # Query inventory for this store
+            inventory_query = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"store_id": store_id}}
+                        ]
+                    }
+                },
+                "size": 1000,
+            }
+
+            inventory_response = await client.post(
+                f"{settings.agent_os_base}/inventory/_search",
+                json=inventory_query,
+                timeout=10.0,
+            )
+            inventory_response.raise_for_status()
+            inventory_data = inventory_response.json()
+
+            # Build map of available products with stock levels
+            available_inventory = {}
+            for hit in inventory_data.get("hits", {}).get("hits", []):
+                source = hit["_source"]
+                product_id = source.get("product_id")
+                stock_level = source.get("stock_level", 0)
+                if product_id and stock_level > 0:
+                    available_inventory[product_id] = {
+                        "stock_level": stock_level,
+                        "inventory_id": source.get("inventory_id"),
+                    }
+
+            # Filter items to only those available in inventory
+            valid_items = []
+            skipped_items = []
+            insufficient_stock_items = []
+
+            for item in items:
+                product_id = item.get("product_id")
+                requested_qty = item.get("quantity", 1)
+
+                if product_id not in available_inventory:
+                    skipped_items.append({
+                        "product_id": product_id,
+                        "reason": "not available at this store",
+                    })
+                elif available_inventory[product_id]["stock_level"] < requested_qty:
+                    insufficient_stock_items.append({
+                        "product_id": product_id,
+                        "requested": requested_qty,
+                        "available": available_inventory[product_id]["stock_level"],
+                    })
+                    # Add item with available quantity instead
+                    valid_items.append({
+                        **item,
+                        "quantity": available_inventory[product_id]["stock_level"],
+                    })
+                else:
+                    valid_items.append(item)
+
+            # If no valid items, return error
+            if not valid_items:
+                return {
+                    "success": False,
+                    "error": "No requested items are available in stock at this store",
+                    "store_id": store_id,
+                    "skipped_items": skipped_items,
+                    "available_products": list(available_inventory.keys()),
+                }
+
+            # Use valid_items for order creation
+            items = valid_items
+
+        except httpx.HTTPError as e:
+            return {
+                "success": False,
+                "error": f"Failed to validate inventory: {str(e)}",
+            }
 
     # Generate unique order ID and number
     order_uuid = uuid4().hex[:8]
@@ -178,7 +263,7 @@ async def create_order(
             )
             response.raise_for_status()
 
-            return {
+            result = {
                 "success": True,
                 "order_id": order_id,
                 "order_number": order_number,
@@ -190,6 +275,20 @@ async def create_order(
                 "delivery_window_start": window_start.isoformat() + "Z",
                 "delivery_window_end": window_end.isoformat() + "Z",
             }
+
+            # Add inventory validation details if any items were skipped or adjusted
+            if skipped_items:
+                result["skipped_items"] = skipped_items
+                result["message"] = f"Order created with {len(items)} items. {len(skipped_items)} items were not available at this store."
+
+            if insufficient_stock_items:
+                result["adjusted_quantities"] = insufficient_stock_items
+                if "message" in result:
+                    result["message"] += f" {len(insufficient_stock_items)} items had quantities adjusted to match available stock."
+                else:
+                    result["message"] = f"Order created with {len(items)} items. {len(insufficient_stock_items)} items had quantities adjusted to match available stock."
+
+            return result
 
         except httpx.HTTPError as e:
             return {

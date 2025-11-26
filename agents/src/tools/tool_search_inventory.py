@@ -17,27 +17,32 @@ async def search_inventory(
     """
     Search for products available in a store's inventory.
 
+    IMPORTANT: This tool ONLY returns products that are actually in stock at the specified store.
+    If a product is not in the results, it means the store does NOT have it available.
+
     Use this tool to:
     - Find products by name or description
     - Check product availability and prices
-    - Get product details for order creation
+    - Verify what items are actually in stock before creating orders
 
     Args:
-        query: Product name or description to search for (e.g., "milk", "bananas", "pasta")
+        query: Product name or description to search for (e.g., "milk", "chicken", "bread")
         store_id: Store to search in (default: store:BK-01)
         limit: Maximum number of results (default: 10)
 
     Returns:
-        List of matching products with:
+        List of matching products ONLY from store inventory with:
         - product_id: Unique product identifier
-        - product_name: Product name
-        - category: Product category
+        - product_name: Full product name
+        - category: Product category (Dairy, Produce, Meat, etc.)
         - unit_price: Price per unit
-        - quantity_available: Current stock level (from inventory)
+        - quantity_available: Current stock level
         - is_perishable: Whether product requires refrigeration
+        - store_id: The store where item is available
 
     Example:
-        search_inventory(query="organic milk", store_id="store:BK-01")
+        search_inventory(query="chicken", store_id="store:BK-01")
+        # Returns only chicken products actually in stock at BK-01
     """
     settings = get_settings()
 
@@ -77,62 +82,84 @@ async def search_inventory(
             if not inventory_items:
                 return []
 
-            # Step 2: Search products by name in OpenSearch
-            # Note: This requires a products index (not yet implemented)
-            # For now, we'll just return inventory items with product IDs
-            # In production, this would join with a products index
-
-            # Build list of product IDs from inventory
+            # Step 2: Fetch product details for items in inventory
+            # Query the API to get product names and details
             product_ids = list(inventory_items.keys())
 
-            # Query products by name match AND available in inventory
-            product_query = {
-                "query": {
-                    "bool": {
-                        "must": [
-                            {
-                                "multi_match": {
-                                    "query": query,
-                                    "fields": ["product_name^2", "category"],
-                                    "type": "best_fields",
-                                    "fuzziness": "AUTO",
-                                }
-                            },
-                            {"terms": {"product_id": product_ids}}
-                        ]
+            # Fetch product details from the triples API
+            product_details = {}
+            for product_id in product_ids:
+                try:
+                    detail_response = await client.get(
+                        f"{settings.agent_api_base}/triples/subjects/{product_id}",
+                        timeout=10.0,
+                    )
+                    if detail_response.status_code == 200:
+                        product_data = detail_response.json()
+                        # The API returns a SubjectInfo with a list of triples
+                        # Parse triples into a property dict
+                        props = {}
+                        for triple in product_data.get("triples", []):
+                            predicate = triple.get("predicate")
+                            object_value = triple.get("object_value")
+                            if predicate and object_value:
+                                props[predicate] = object_value
+
+                        # Extract product details from parsed properties
+                        # Parse unit_price safely
+                        unit_price = None
+                        if "unit_price" in props:
+                            try:
+                                unit_price = float(props["unit_price"])
+                            except (ValueError, TypeError):
+                                pass
+
+                        product_details[product_id] = {
+                            "product_name": props.get("product_name", product_id),
+                            "category": props.get("category", "Unknown"),
+                            "unit_price": unit_price,
+                            "is_perishable": props.get("perishable", "false").lower() == "true",
+                        }
+                except httpx.HTTPError:
+                    # If we can't fetch details, use product_id as name
+                    product_details[product_id] = {
+                        "product_name": product_id,
+                        "category": "Unknown",
                     }
-                },
-                "size": limit,
-            }
 
-            # For now, return basic inventory info with product IDs
-            # Products index not yet implemented in OpenSearch
-            # Agent can use product_id to look up details if needed
+            # Step 3: Filter products by search query
             results = []
-            for product_id in list(inventory_items.keys())[:limit]:
-                inv_info = inventory_items[product_id]
+            query_lower = query.lower()
 
-                # Simple name filter on product_id
-                if query.lower() in product_id.lower():
-                    results.append({
+            for product_id, inv_info in inventory_items.items():
+                product_info = product_details.get(product_id, {})
+                product_name = product_info.get("product_name", product_id)
+                category = product_info.get("category", "Unknown")
+
+                # Search in product name, category, or product_id
+                if (query_lower in product_name.lower() or
+                    query_lower in category.lower() or
+                    query_lower in product_id.lower()):
+
+                    result = {
                         "product_id": product_id,
+                        "product_name": product_name,
+                        "category": category,
+                        "unit_price": product_info.get("unit_price"),
                         "store_id": store_id,
                         "quantity_available": inv_info.get("stock_level", 0),
                         "replenishment_eta": inv_info.get("replenishment_eta"),
-                        "note": "Product details lookup not yet implemented. Use product_id to reference in orders.",
-                    })
+                        "is_perishable": product_info.get("is_perishable", False),
+                    }
 
-            # If no results by product_id match, return all inventory for the store
-            if not results and inventory_items:
-                for product_id, inv_info in list(inventory_items.items())[:limit]:
-                    results.append({
-                        "product_id": product_id,
-                        "store_id": store_id,
-                        "quantity_available": inv_info.get("stock_level", 0),
-                        "replenishment_eta": inv_info.get("replenishment_eta"),
-                    })
+                    # Add warning if price is missing
+                    if product_info.get("unit_price") is None:
+                        result["warning"] = "Price information unavailable for this product"
 
-            return results
+                    results.append(result)
+
+            # Return top results up to limit
+            return results[:limit]
 
         except httpx.HTTPError as e:
             return [{"error": f"Search failed: {str(e)}"}]

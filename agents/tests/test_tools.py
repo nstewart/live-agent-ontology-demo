@@ -473,12 +473,32 @@ class TestCreateOrder:
         """Creates order with correct ontology predicates."""
         with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
             with patch("httpx.AsyncClient") as mock_client_class:
-                mock_response = MagicMock()
-                mock_response.status_code = 201
-                mock_response.raise_for_status = MagicMock()
+                # Mock inventory response
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "inventory_id": "inv:001",
+                                    "store_id": "store:BK-01",
+                                    "product_id": "product:milk-1L",
+                                    "stock_level": 50,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock order creation response
+                mock_order_response = MagicMock()
+                mock_order_response.status_code = 201
+                mock_order_response.raise_for_status = MagicMock()
 
                 mock_client = AsyncMock()
-                mock_client.post = AsyncMock(return_value=mock_response)
+                # First call is inventory search, second is order creation
+                mock_client.post = AsyncMock(side_effect=[mock_inventory_response, mock_order_response])
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock()
                 mock_client_class.return_value = mock_client
@@ -502,8 +522,9 @@ class TestCreateOrder:
                 assert result["order_status"] == "CREATED"
                 assert result["customer_id"] == "customer:test123"
 
-                # Verify the API call
-                call_args = mock_client.post.call_args
+                # Verify the order creation API call (second call)
+                assert mock_client.post.call_count == 2
+                call_args = mock_client.post.call_args_list[1]
                 triples = call_args.kwargs["json"]
 
                 # Check order predicates
@@ -526,12 +547,31 @@ class TestCreateOrder:
         """Ensures order_status is always CREATED initially."""
         with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
             with patch("httpx.AsyncClient") as mock_client_class:
-                mock_response = MagicMock()
-                mock_response.status_code = 201
-                mock_response.raise_for_status = MagicMock()
+                # Mock inventory response
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "inventory_id": "inv:001",
+                                    "store_id": "store:BK-01",
+                                    "product_id": "product:milk",
+                                    "stock_level": 50,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock order creation response
+                mock_order_response = MagicMock()
+                mock_order_response.status_code = 201
+                mock_order_response.raise_for_status = MagicMock()
 
                 mock_client = AsyncMock()
-                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.post = AsyncMock(side_effect=[mock_inventory_response, mock_order_response])
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock()
                 mock_client_class.return_value = mock_client
@@ -548,8 +588,8 @@ class TestCreateOrder:
                 # Check return value
                 assert result["order_status"] == "CREATED"
 
-                # Check the triple sent to API
-                call_args = mock_client.post.call_args
+                # Check the triple sent to API (second call)
+                call_args = mock_client.post.call_args_list[1]
                 triples = call_args.kwargs["json"]
                 status_triple = next(t for t in triples if t["predicate"] == "order_status")
                 assert status_triple["object_value"] == "CREATED"
@@ -559,12 +599,31 @@ class TestCreateOrder:
         """Calculates line_amount for each item."""
         with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
             with patch("httpx.AsyncClient") as mock_client_class:
-                mock_response = MagicMock()
-                mock_response.status_code = 201
-                mock_response.raise_for_status = MagicMock()
+                # Mock inventory response
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "inventory_id": "inv:001",
+                                    "store_id": "store:BK-01",
+                                    "product_id": "product:milk",
+                                    "stock_level": 50,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock order creation response
+                mock_order_response = MagicMock()
+                mock_order_response.status_code = 201
+                mock_order_response.raise_for_status = MagicMock()
 
                 mock_client = AsyncMock()
-                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.post = AsyncMock(side_effect=[mock_inventory_response, mock_order_response])
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock()
                 mock_client_class.return_value = mock_client
@@ -578,7 +637,7 @@ class TestCreateOrder:
                     ],
                 })
 
-                call_args = mock_client.post.call_args
+                call_args = mock_client.post.call_args_list[1]
                 triples = call_args.kwargs["json"]
 
                 # Find line_amount triple
@@ -609,3 +668,145 @@ class TestCreateOrder:
 
                 assert result["success"] is False
                 assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_filters_unavailable_items(self, mock_settings):
+        """Filters out items not in store inventory."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                # Mock inventory response - only milk is available
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "inventory_id": "inv:001",
+                                    "store_id": "store:BK-01",
+                                    "product_id": "product:milk",
+                                    "stock_level": 50,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock order creation response
+                mock_order_response = MagicMock()
+                mock_order_response.status_code = 201
+                mock_order_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=[mock_inventory_response, mock_order_response])
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "store_id": "store:BK-01",
+                    "items": [
+                        {"product_id": "product:milk", "quantity": 1, "unit_price": 5.0},
+                        {"product_id": "product:bananas", "quantity": 2, "unit_price": 2.0},
+                    ],
+                })
+
+                # Order should succeed with only milk
+                assert result["success"] is True
+                assert result["item_count"] == 1
+                assert "skipped_items" in result
+                assert len(result["skipped_items"]) == 1
+                assert result["skipped_items"][0]["product_id"] == "product:bananas"
+
+    @pytest.mark.asyncio
+    async def test_adjusts_quantity_for_insufficient_stock(self, mock_settings):
+        """Adjusts quantity when stock is insufficient."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                # Mock inventory response - only 5 units available
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "inventory_id": "inv:001",
+                                    "store_id": "store:BK-01",
+                                    "product_id": "product:milk",
+                                    "stock_level": 5,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock order creation response
+                mock_order_response = MagicMock()
+                mock_order_response.status_code = 201
+                mock_order_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(side_effect=[mock_inventory_response, mock_order_response])
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "store_id": "store:BK-01",
+                    "items": [
+                        {"product_id": "product:milk", "quantity": 10, "unit_price": 5.0},
+                    ],
+                })
+
+                # Order should succeed with adjusted quantity
+                assert result["success"] is True
+                assert "adjusted_quantities" in result
+                assert len(result["adjusted_quantities"]) == 1
+                assert result["adjusted_quantities"][0]["requested"] == 10
+                assert result["adjusted_quantities"][0]["available"] == 5
+
+                # Check that order was created with 5 units, not 10
+                call_args = mock_client.post.call_args_list[1]
+                triples = call_args.kwargs["json"]
+                quantity_triple = next(t for t in triples if t["predicate"] == "quantity")
+                assert quantity_triple["object_value"] == "5"
+
+    @pytest.mark.asyncio
+    async def test_returns_error_when_no_items_available(self, mock_settings):
+        """Returns error when no requested items are in stock."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                # Mock empty inventory response
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {"hits": []}
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "store_id": "store:BK-01",
+                    "items": [
+                        {"product_id": "product:bananas", "quantity": 2, "unit_price": 2.0},
+                    ],
+                })
+
+                # Should return error
+                assert result["success"] is False
+                assert "No requested items are available" in result["error"]
+                assert "available_products" in result
