@@ -1,0 +1,18 @@
+{
+  "name": "zero-permissions",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "update": "tsx update-permissions.ts"
+  },
+  "dependencies": {
+    "@rocicorp/zero": "^0.24.3000000000",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.9",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

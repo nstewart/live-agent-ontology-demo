@@ -44,6 +44,64 @@ services:
       retries: 30
       start_period: 30s
 
+  zero-cache:
+      image: rocicorp/zero:0.24.3000000000
+      restart: always
+      container_name: zero-cache
+      depends_on:
+        db:
+          condition: service_healthy
+        materialize-zero:
+          condition: service_started
+      environment:
+          ZERO_UPSTREAM_TYPE: custom
+          ZERO_UPSTREAM_DB: "ws://materialize-zero:8080"
+          ZERO_REPLICA_FILE: "/data/replica.db"
+          ZERO_CVR_DB: "postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgres}@db:5432/zero_cvr"
+          ZERO_CHANGE_DB: "postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgres}@db:5432/zero_change"
+          ZERO_NUM_SYNC_WORKERS: 1
+          ZERO_ADMIN_PASSWORD: "admin"
+          ZERO_LOG_LEVEL: "debug"
+      volumes:
+          - zero_data:/data
+      ports:
+          - "4848:4848"
+
+  materialize-zero:
+      image: a1q3r1n/materialize-zero:0.0.3
+      container_name: materialize-zero
+      depends_on:
+        mz:
+          condition: service_healthy
+      environment:
+          MATERIALIZE_HOST_ADDRESS: ${MZ_HOST:-mz}:6876
+          MATERIALIZE_AUTH_OPTIONS_USER: ${MZ_USER:-materialize}
+          MATERIALIZE_AUTH_OPTIONS_PASSWORD: ${MZ_PASSWORD:-materialize}
+          MATERIALIZE_DATABASE: ${MZ_DATABASE:-materialize}
+          MATERIALIZE_COLLECTIONS: "orders_flat_mv,courier_schedule_mv,customers_mv,orders_search_source_mv,products_mv,store_inventory_mv,stores_mv,orders_with_lines_mv"
+          PORT: 8080
+      ports:
+          - "8082:8080"
+      extra_hosts:
+          - "host.docker.internal:host-gateway"
+
+  # Updates Zero permissions after materialize-zero creates the table
+  zero-permissions:
+      build:
+        context: .
+        dockerfile: zero-permissions/Dockerfile
+      container_name: zero-permissions
+      depends_on:
+        materialize-zero:
+          condition: service_started
+      environment:
+          MZ_HOST: ${MZ_HOST:-mz}
+          MZ_PORT: ${MZ_PORT:-6875}
+          MZ_USER: ${MZ_USER:-materialize}
+          MZ_PASSWORD: ${MZ_PASSWORD:-materialize}
+          MZ_DATABASE: ${MZ_DATABASE:-materialize}
+      restart: "no"
+
   opensearch:
     image: opensearchproject/opensearch:2.11.0
     environment:
@@ -146,41 +204,17 @@ services:
     volumes:
       - ./search-sync:/app:cached
 
-  zero-server:
-    build:
-      context: ./zero-server
-      dockerfile: Dockerfile
-    environment:
-      - PORT=8090
-      - MZ_HOST=${MZ_HOST:-mz}
-      - MZ_PORT=6875
-      - MZ_USER=${MZ_USER:-materialize}
-      - MZ_PASSWORD=${MZ_PASSWORD:-materialize}
-      - MZ_DATABASE=${MZ_DATABASE:-materialize}
-      - ZERO_COLLECTIONS=orders,stores,couriers,inventory,order_lines
-    ports:
-      - "${ZERO_PORT:-8090}:8090"
-    depends_on:
-      mz:
-        condition: service_healthy
-    restart: unless-stopped
-    volumes:
-      - ./zero-server:/app:cached
-      - /app/node_modules
-    command: npm run dev
-
   web:
     build:
       context: ./web
       dockerfile: Dockerfile
     environment:
       - VITE_API_URL=http://localhost:${API_PORT:-8080}
-      - VITE_ZERO_URL=ws://localhost:${ZERO_PORT:-8090}
+      - VITE_ZERO_URL=http://localhost:4848
     ports:
       - "${WEB_PORT:-5173}:5173"
     depends_on:
       - api
-      - zero-server
     volumes:
       - ./web:/app:cached
       - /app/node_modules
@@ -214,6 +248,7 @@ services:
 volumes:
   postgres_data:
   opensearch_data:
+  zero_data:
 
 networks:
   default:
