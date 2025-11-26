@@ -172,12 +172,19 @@ export class ZeroServer {
     // Map collection names to Materialize view names
     const viewMap: Record<string, string> = {
       orders: "orders_search_source_mv",  // Use enriched view with customer/store names
+      orders_with_lines_mv: "orders_with_lines_mv",  // Orders with aggregated line items
+      orders_search_source_mv: "orders_search_source_mv",  // Direct view name support
       stores: "stores_flat",
+      stores_mv: "stores_mv",  // Direct view name support
       couriers: "courier_schedule_mv",
+      courier_schedule_mv: "courier_schedule_mv",  // Direct view name support
       inventory: "store_inventory_mv",
+      store_inventory_mv: "store_inventory_mv",  // Direct view name support
       courier_tasks: "delivery_task_mv",
       order_lines: "order_lines_flat_mv",  // Line items with product enrichment
       triples: "triples",
+      customers_mv: "customers_mv",  // Direct view name support
+      products_mv: "products_mv",  // Direct view name support
     };
 
     return viewMap[collection] || collection;

@@ -7,12 +7,13 @@ help:
 	@echo ""
 	@echo "Setup & Run:"
 	@echo "  make setup      - Initial setup (copy .env, build containers)"
-	@echo "  make up         - Start all services and initialize Materialize"
-	@echo "  make up-agent   - Start all services (including agent) and initialize Materialize"
+	@echo "  make up         - Start all services (Materialize auto-initializes)"
+	@echo "  make up-agent   - Start all services including agent (Materialize auto-initializes)"
 	@echo "  make down       - Stop all services"
-	@echo "  make init-mz    - Initialize Materialize (sources, views, indexes)"
+	@echo "  make init-mz    - Manually re-initialize Materialize (usually not needed)"
 	@echo "  make logs       - Tail logs from all services"
 	@echo "  make logs-api   - Tail logs from API service"
+	@echo "  make logs-sync  - Tail logs from search-sync service"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate         - Run database migrations"
@@ -69,7 +70,8 @@ up:
 	@echo "  - PostgreSQL: localhost:$${PG_PORT:-5432}"
 	@echo "  - OpenSearch: http://localhost:$${OS_PORT:-9200}"
 	@echo ""
-	@$(MAKE) init-mz
+	@echo "Note: Materialize is automatically initialized via materialize-init service"
+	@echo "      OpenSearch will be populated automatically once search-sync starts"
 	@echo ""
 	@echo "All services ready! Run 'make logs' to see service output"
 
@@ -80,10 +82,12 @@ up-agent:
 	@echo ""
 	@echo "Waiting for services to be ready..."
 	@sleep 3
-	@$(MAKE) init-mz
 	@echo ""
 	@echo "Initializing agent checkpointer..."
 	@docker-compose exec agents python -m src.init_checkpointer
+	@echo ""
+	@echo "Note: Materialize is automatically initialized via materialize-init service"
+	@echo "      OpenSearch will be populated automatically once search-sync starts"
 	@echo ""
 	@echo "All services ready (including agents)!"
 

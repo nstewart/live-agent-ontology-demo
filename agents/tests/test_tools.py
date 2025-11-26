@@ -463,3 +463,149 @@ class TestWriteTriples:
 
                 call_args = mock_client.post.call_args
                 assert call_args.kwargs["params"]["validate"] is False
+
+
+class TestCreateOrder:
+    """Tests for create_order tool."""
+
+    @pytest.mark.asyncio
+    async def test_creates_order_with_correct_predicates(self, mock_settings):
+        """Creates order with correct ontology predicates."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "store_id": "store:BK-01",
+                    "items": [
+                        {
+                            "product_id": "product:milk-1L",
+                            "quantity": 2,
+                            "unit_price": 4.99,
+                            "is_perishable": True,
+                        }
+                    ],
+                })
+
+                assert result["success"] is True
+                assert result["order_status"] == "CREATED"
+                assert result["customer_id"] == "customer:test123"
+
+                # Verify the API call
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+
+                # Check order predicates
+                predicates = {t["predicate"] for t in triples}
+                assert "order_status" in predicates
+                assert "placed_by" in predicates
+                assert "order_store" in predicates
+                assert "order_number" in predicates
+
+                # Check line item predicates match ontology
+                assert "line_of_order" in predicates
+                assert "line_product" in predicates
+                assert "quantity" in predicates
+                assert "order_line_unit_price" in predicates
+                assert "line_amount" in predicates
+                assert "perishable_flag" in predicates
+
+    @pytest.mark.asyncio
+    async def test_order_always_starts_in_created_state(self, mock_settings):
+        """Ensures order_status is always CREATED initially."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "items": [
+                        {"product_id": "product:milk", "quantity": 1, "unit_price": 5.0}
+                    ],
+                })
+
+                # Check return value
+                assert result["order_status"] == "CREATED"
+
+                # Check the triple sent to API
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+                status_triple = next(t for t in triples if t["predicate"] == "order_status")
+                assert status_triple["object_value"] == "CREATED"
+
+    @pytest.mark.asyncio
+    async def test_calculates_line_amounts(self, mock_settings):
+        """Calculates line_amount for each item."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "items": [
+                        {"product_id": "product:milk", "quantity": 2, "unit_price": 4.99}
+                    ],
+                })
+
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+
+                # Find line_amount triple
+                line_amount_triple = next(t for t in triples if t["predicate"] == "line_amount")
+                assert line_amount_triple["object_value"] == "9.98"  # 2 * 4.99
+
+    @pytest.mark.asyncio
+    async def test_handles_api_error(self, mock_settings):
+        """Handles API errors gracefully."""
+        with patch("src.tools.tool_create_order.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_order import create_order
+
+                result = await create_order.ainvoke({
+                    "customer_id": "customer:test123",
+                    "items": [
+                        {"product_id": "product:milk", "quantity": 1, "unit_price": 5.0}
+                    ],
+                })
+
+                assert result["success"] is False
+                assert "error" in result
