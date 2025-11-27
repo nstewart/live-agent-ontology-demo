@@ -183,66 +183,132 @@ Let's walk through adding a new **"Promotion"** entity to support marketing camp
 
 Choose a unique prefix and create the class:
 
-```sql
--- Via SQL
+```bash
+# Via API
+curl -X POST http://localhost:8080/ontology/classes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "class_name": "Promotion",
+    "prefix": "promo",
+    "description": "A marketing promotion or discount campaign"
+  }'
+
+# Or via SQL (if working directly with the database)
+# psql -h localhost -p 5432 -U postgres -d freshmart
 INSERT INTO ontology_classes (class_name, prefix, description)
 VALUES ('Promotion', 'promo', 'A marketing promotion or discount campaign');
-
--- Or via API
-POST /ontology/classes
-{
-  "class_name": "Promotion",
-  "prefix": "promo",
-  "description": "A marketing promotion or discount campaign"
-}
 ```
 
 **1b. Define Properties**
 
-Think about what attributes promotions need:
+Think about what attributes promotions need. First, get the class IDs:
 
-```sql
--- Promotion name (required string)
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, is_required, description)
-SELECT 'promo_code', id, 'string', TRUE, 'Unique promotion code (e.g., SUMMER25)'
-FROM ontology_classes WHERE class_name = 'Promotion';
+```bash
+# Get all classes to find the Promotion and Store IDs
+curl http://localhost:8080/ontology/classes
 
--- Discount percentage (required float)
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, is_required, description)
-SELECT 'discount_percent', id, 'float', TRUE, 'Discount percentage (0.0 to 100.0)'
-FROM ontology_classes WHERE class_name = 'Promotion';
-
--- Valid dates (required timestamps)
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, is_required, description)
-SELECT 'valid_from', id, 'timestamp', TRUE, 'Promotion start date'
-FROM ontology_classes WHERE class_name = 'Promotion';
-
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, is_required, description)
-SELECT 'valid_until', id, 'timestamp', TRUE, 'Promotion end date'
-FROM ontology_classes WHERE class_name = 'Promotion';
-
--- Applicable store (optional entity reference)
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_required, description)
-SELECT 'promo_store', p.id, 'entity_ref', s.id, FALSE, 'Store where promotion is valid (NULL = all stores)'
-FROM ontology_classes p, ontology_classes s
-WHERE p.class_name = 'Promotion' AND s.class_name = 'Store';
-
--- Active status (required boolean)
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, is_required, description)
-SELECT 'is_active', id, 'bool', TRUE, 'Whether promotion is currently active'
-FROM ontology_classes WHERE class_name = 'Promotion';
+# Response will show:
+# {"id": 9, "class_name": "Promotion", "prefix": "promo", ...}
+# {"id": 2, "class_name": "Store", "prefix": "store", ...}
 ```
+
+Then create the properties (replace `9` and `2` with actual IDs from above):
+
+```bash
+# Promotion code (required string)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "promo_code",
+    "domain_class_id": 9,
+    "range_kind": "string",
+    "is_required": true,
+    "description": "Unique promotion code (e.g., SUMMER25)"
+  }'
+
+# Discount percentage (required float)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "discount_percent",
+    "domain_class_id": 9,
+    "range_kind": "float",
+    "is_required": true,
+    "description": "Discount percentage (0.0 to 100.0)"
+  }'
+
+# Valid from date (required timestamp)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "valid_from",
+    "domain_class_id": 9,
+    "range_kind": "timestamp",
+    "is_required": true,
+    "description": "Promotion start date"
+  }'
+
+# Valid until date (required timestamp)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "valid_until",
+    "domain_class_id": 9,
+    "range_kind": "timestamp",
+    "is_required": true,
+    "description": "Promotion end date"
+  }'
+
+# Applicable store (optional entity reference to Store)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "promo_store",
+    "domain_class_id": 9,
+    "range_kind": "entity_ref",
+    "range_class_id": 2,
+    "is_required": false,
+    "description": "Store where promotion is valid (NULL = all stores)"
+  }'
+
+# Active status (required boolean)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "is_active",
+    "domain_class_id": 9,
+    "range_kind": "bool",
+    "is_required": true,
+    "description": "Whether promotion is currently active"
+  }'
+```
+
+**Alternative: Use the Admin UI**
+
+Instead of curl commands, you can use the Admin UI at http://localhost:5173:
+1. Navigate to "Ontology Properties"
+2. Find the "Promotion" section
+3. Click "Add Property" to create each property with the form
 
 **1c. Extend Existing Classes (if needed)**
 
-If orders can use promotions, add a relationship:
+If orders can use promotions, add a relationship property to the Order class:
 
-```sql
--- Add promo_applied property to Order class
-INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_required, description)
-SELECT 'promo_applied', o.id, 'entity_ref', p.id, FALSE, 'Promotion code applied to this order'
-FROM ontology_classes o, ontology_classes p
-WHERE o.class_name = 'Order' AND p.class_name = 'Promotion';
+```bash
+# Get Order class ID (usually id: 5)
+curl http://localhost:8080/ontology/classes | grep -A 2 '"class_name": "Order"'
+
+# Add promo_applied property to Order class (replace 5 and 9 with actual IDs)
+curl -X POST http://localhost:8080/ontology/properties \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prop_name": "promo_applied",
+    "domain_class_id": 5,
+    "range_kind": "entity_ref",
+    "range_class_id": 9,
+    "is_required": false,
+    "description": "Promotion code applied to this order"
+  }'
 ```
 
 #### Step 2: Write Triples
@@ -250,25 +316,38 @@ WHERE o.class_name = 'Order' AND p.class_name = 'Promotion';
 Now you can create promotion entities:
 
 ```bash
-# Via API
-POST /triples/batch
-[
-  {"subject_id": "promo:SUMMER25", "predicate": "promo_code", "object_value": "SUMMER25", "object_type": "string"},
-  {"subject_id": "promo:SUMMER25", "predicate": "discount_percent", "object_value": "15.0", "object_type": "float"},
-  {"subject_id": "promo:SUMMER25", "predicate": "valid_from", "object_value": "2025-06-01T00:00:00Z", "object_type": "timestamp"},
-  {"subject_id": "promo:SUMMER25", "predicate": "valid_until", "object_value": "2025-08-31T23:59:59Z", "object_type": "timestamp"},
-  {"subject_id": "promo:SUMMER25", "predicate": "promo_store", "object_value": "store:BK-01", "object_type": "entity_ref"},
-  {"subject_id": "promo:SUMMER25", "predicate": "is_active", "object_value": "true", "object_type": "bool"}
-]
+# Create a promotion with all properties
+curl -X POST http://localhost:8080/triples/batch \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"subject_id": "promo:SUMMER25", "predicate": "promo_code", "object_value": "SUMMER25", "object_type": "string"},
+    {"subject_id": "promo:SUMMER25", "predicate": "discount_percent", "object_value": "15.0", "object_type": "float"},
+    {"subject_id": "promo:SUMMER25", "predicate": "valid_from", "object_value": "2025-06-01T00:00:00Z", "object_type": "timestamp"},
+    {"subject_id": "promo:SUMMER25", "predicate": "valid_until", "object_value": "2025-08-31T23:59:59Z", "object_type": "timestamp"},
+    {"subject_id": "promo:SUMMER25", "predicate": "promo_store", "object_value": "store:BK-01", "object_type": "entity_ref"},
+    {"subject_id": "promo:SUMMER25", "predicate": "is_active", "object_value": "true", "object_type": "bool"}
+  ]'
 
 # Apply promotion to an order
-POST /triples
-{
-  "subject_id": "order:FM-1001",
-  "predicate": "promo_applied",
-  "object_value": "promo:SUMMER25",
-  "object_type": "entity_ref"
-}
+curl -X POST http://localhost:8080/triples \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject_id": "order:FM-1001",
+    "predicate": "promo_applied",
+    "object_value": "promo:SUMMER25",
+    "object_type": "entity_ref"
+  }'
+
+# Create another promotion (all stores, higher discount)
+curl -X POST http://localhost:8080/triples/batch \
+  -H "Content-Type: application/json" \
+  -d '[
+    {"subject_id": "promo:BACKTOSCHOOL", "predicate": "promo_code", "object_value": "BACKTOSCHOOL", "object_type": "string"},
+    {"subject_id": "promo:BACKTOSCHOOL", "predicate": "discount_percent", "object_value": "20.0", "object_type": "float"},
+    {"subject_id": "promo:BACKTOSCHOOL", "predicate": "valid_from", "object_value": "2025-08-15T00:00:00Z", "object_type": "timestamp"},
+    {"subject_id": "promo:BACKTOSCHOOL", "predicate": "valid_until", "object_value": "2025-09-15T23:59:59Z", "object_type": "timestamp"},
+    {"subject_id": "promo:BACKTOSCHOOL", "predicate": "is_active", "object_value": "true", "object_type": "bool"}
+  ]'
 ```
 
 The ontology validator will ensure:
