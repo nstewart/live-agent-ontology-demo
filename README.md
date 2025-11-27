@@ -486,6 +486,376 @@ const [activePromos] = useQuery(
 );
 ```
 
+#### Step 6: Sync to OpenSearch and Enable Agent Search
+
+To make promotions searchable by agents and support full-text queries, sync the materialized view to OpenSearch using a SUBSCRIBE worker.
+
+**6a. Create a Promotion Sync Worker**
+
+Create `search-sync/src/promotions_sync.py`:
+
+```python
+"""Promotions sync worker - syncs promotions_mv to OpenSearch using SUBSCRIBE streaming."""
+
+import logging
+from typing import Optional
+from datetime import datetime
+
+from src.base_subscribe_worker import BaseSubscribeWorker
+from src.opensearch_client import OpenSearchClient
+
+logger = logging.getLogger(__name__)
+
+
+# Promotions index mapping with text search on promo_code and store
+PROMOTIONS_INDEX_MAPPING = {
+    "mappings": {
+        "properties": {
+            "promo_id": {"type": "keyword"},
+            "promo_code": {
+                "type": "text",
+                "copy_to": "search_text",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            "discount_percent": {"type": "float"},
+            "valid_from": {"type": "date"},
+            "valid_until": {"type": "date"},
+            "store_id": {"type": "keyword"},
+            "is_active": {"type": "boolean"},
+            "is_currently_valid": {"type": "boolean"},
+            "store_name": {
+                "type": "text",
+                "copy_to": "search_text",
+                "fields": {"keyword": {"type": "keyword"}},
+            },
+            "store_zone": {"type": "keyword"},
+            "effective_updated_at": {"type": "date"},
+            "search_text": {"type": "text"},  # Combined search field
+        }
+    },
+    "settings": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0,
+    },
+}
+
+
+class PromotionsSyncWorker(BaseSubscribeWorker):
+    """Worker that syncs promotions from Materialize to OpenSearch.
+
+    Enables full-text search on promotion codes, stores, and time-based
+    filtering for active/valid promotions.
+    """
+
+    def get_view_name(self) -> str:
+        """Return Materialize view name."""
+        return "promotions_mv"
+
+    def get_index_name(self) -> str:
+        """Return OpenSearch index name."""
+        return "promotions"
+
+    def should_consolidate_events(self) -> bool:
+        """Enable UPDATE consolidation.
+
+        Promotions can be updated when:
+        - is_active status changes
+        - Store details change (denormalized)
+        - Dates are adjusted
+        """
+        return True
+
+    def get_doc_id(self, data: dict) -> str:
+        """Extract document ID from event data."""
+        return data.get("promo_id")
+
+    def transform_event_to_doc(self, data: dict) -> Optional[dict]:
+        """Transform Materialize event to OpenSearch document."""
+        doc_id = self.get_doc_id(data)
+        if not doc_id:
+            return None
+
+        # Parse dates safely
+        valid_from = data.get("valid_from")
+        valid_until = data.get("valid_until")
+
+        return {
+            "promo_id": doc_id,
+            "promo_code": data.get("promo_code"),
+            "discount_percent": float(data.get("discount_percent", 0)),
+            "valid_from": valid_from,
+            "valid_until": valid_until,
+            "store_id": data.get("store_id"),
+            "is_active": data.get("is_active"),
+            "is_currently_valid": data.get("is_currently_valid"),
+            "store_name": data.get("store_name"),
+            "store_zone": data.get("store_zone"),
+            "effective_updated_at": data.get("effective_updated_at"),
+        }
+
+    def get_index_mapping(self) -> dict:
+        """Return OpenSearch index mapping."""
+        return PROMOTIONS_INDEX_MAPPING
+```
+
+**6b. Register the Worker in the Sync Service**
+
+Update `search-sync/src/main.py` to run the promotions worker:
+
+```python
+# search-sync/src/main.py
+import asyncio
+from src.opensearch_client import OpenSearchClient
+from src.orders_sync import OrdersSyncWorker
+from src.inventory_sync import InventorySyncWorker
+from src.promotions_sync import PromotionsSyncWorker  # Add this import
+
+async def main():
+    """Run all sync workers concurrently."""
+    os_client = OpenSearchClient()
+
+    # Create workers
+    orders_worker = OrdersSyncWorker(os_client)
+    inventory_worker = InventorySyncWorker(os_client)
+    promotions_worker = PromotionsSyncWorker(os_client)  # Add this
+
+    # Run all workers concurrently
+    await asyncio.gather(
+        orders_worker.run(),
+        inventory_worker.run(),
+        promotions_worker.run(),  # Add this
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+**What happens automatically:**
+- ✅ Initial hydration: All existing promotions bulk-loaded to OpenSearch on startup
+- ✅ Real-time sync: New/updated promotions streamed via SUBSCRIBE (< 2s latency)
+- ✅ UPDATE consolidation: Status changes handled efficiently (no spurious deletes)
+- ✅ Automatic retry: Reconnects if Materialize restarts
+- ✅ Index creation: OpenSearch index created if it doesn't exist
+
+**6c. Create an Agent Search Tool**
+
+Create `agents/src/tools/tool_search_promotions.py`:
+
+```python
+"""Tool for searching active promotions."""
+
+import httpx
+from langchain_core.tools import tool
+from src.config import get_settings
+
+
+@tool
+async def search_promotions(
+    query: str = "",
+    store_id: str | None = None,
+    active_only: bool = True,
+    valid_now: bool = True,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Search for promotional discounts and campaigns.
+
+    Use this tool to:
+    - Find active promotions for a store
+    - Check if a promo code exists and is valid
+    - Discover available discounts for order creation
+
+    Args:
+        query: Search by promo code or store name (optional)
+        store_id: Filter by store (e.g., "store:BK-01"), or None for all stores
+        active_only: Only return active promotions (default: True)
+        valid_now: Only return currently valid promotions by date (default: True)
+        limit: Maximum results (default: 10)
+
+    Returns:
+        List of matching promotions with:
+        - promo_id: Unique identifier
+        - promo_code: Human-readable code (e.g., "SUMMER25")
+        - discount_percent: Discount percentage (0-100)
+        - valid_from: Start date
+        - valid_until: End date
+        - store_id: Applicable store (null = all stores)
+        - store_name: Store display name
+        - is_active: Whether promotion is active
+        - is_currently_valid: Whether current time is within valid dates
+
+    Example:
+        search_promotions(query="SUMMER", store_id="store:BK-01")
+        # Returns SUMMER25 promotion if active and valid at BK-01
+    """
+    settings = get_settings()
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # Build OpenSearch query
+            must_conditions = []
+
+            # Text search on promo_code and store_name
+            if query:
+                must_conditions.append({
+                    "multi_match": {
+                        "query": query,
+                        "fields": ["promo_code^2", "store_name", "search_text"],
+                        "type": "best_fields",
+                        "fuzziness": "AUTO",
+                    }
+                })
+
+            # Filter by store (including store_id=null for all-stores promos)
+            if store_id:
+                must_conditions.append({
+                    "bool": {
+                        "should": [
+                            {"term": {"store_id": store_id}},
+                            {"bool": {"must_not": {"exists": {"field": "store_id"}}}}
+                        ]
+                    }
+                })
+
+            # Filter by active status
+            if active_only:
+                must_conditions.append({"term": {"is_active": True}})
+
+            # Filter by current validity
+            if valid_now:
+                must_conditions.append({"term": {"is_currently_valid": True}})
+
+            search_query = {
+                "query": {
+                    "bool": {
+                        "must": must_conditions if must_conditions else [{"match_all": {}}]
+                    }
+                },
+                "size": limit,
+                "sort": [{"discount_percent": "desc"}],  # Highest discounts first
+            }
+
+            response = await client.post(
+                f"{settings.agent_os_base}/promotions/_search",
+                json=search_query,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract results
+            results = []
+            for hit in data.get("hits", {}).get("hits", []):
+                source = hit["_source"]
+                results.append({
+                    "promo_id": source.get("promo_id"),
+                    "promo_code": source.get("promo_code"),
+                    "discount_percent": source.get("discount_percent"),
+                    "valid_from": source.get("valid_from"),
+                    "valid_until": source.get("valid_until"),
+                    "store_id": source.get("store_id") or "All stores",
+                    "store_name": source.get("store_name") or "All stores",
+                    "is_active": source.get("is_active"),
+                    "is_currently_valid": source.get("is_currently_valid"),
+                })
+
+            return results
+
+        except httpx.HTTPError as e:
+            return [{"error": f"Search failed: {str(e)}"}]
+```
+
+**6d. Register the Tool with the Agent**
+
+Update `agents/src/tools/__init__.py`:
+
+```python
+from src.tools.tool_search_orders import search_orders
+from src.tools.tool_search_inventory import search_inventory
+from src.tools.tool_search_promotions import search_promotions  # Add this
+# ... other imports
+
+# Agent tools list
+AGENT_TOOLS = [
+    search_orders,
+    search_inventory,
+    search_promotions,  # Add this
+    fetch_order_context,
+    create_customer,
+    create_order,
+    # ... other tools
+]
+```
+
+**6e. Use the Tool in Agent Conversations**
+
+Now agents can search promotions in natural language:
+
+```bash
+# Start agent
+docker-compose exec -it agents python -m src.main chat
+
+# Agent can now answer queries like:
+> "What promotions are available at the Brooklyn store?"
+Assistant: I found 2 active promotions at FreshMart Brooklyn 1:
+- SUMMER25: 15% off, valid until Aug 31
+- BACKTOSCHOOL: 10% off, valid until Sep 15
+
+> "Can I use promo code SUMMER25 for an order?"
+Assistant: Yes! SUMMER25 is currently active and provides a 15% discount.
+It's valid at store:BK-01 until 2025-08-31.
+
+> "Find the best promotion available right now"
+Assistant: The best promotion is SUMMER25 with 15% off, valid at Brooklyn store
+until August 31st. Would you like me to apply it to an order?
+```
+
+**Architecture: Complete Data Flow**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. WRITE: Create Promotion via API                              │
+│    POST /triples/batch → PostgreSQL (validated by ontology)     │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. CDC: Change Data Capture                                     │
+│    PostgreSQL → Materialize (pg_source replicates triples)      │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. TRANSFORM: Materialize Views                                 │
+│    promotions_flat → promotions_enriched → promotions_mv        │
+│    (computed: is_currently_valid using mz_now())                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. SUBSCRIBE: Real-time Streaming                               │
+│    PromotionsSyncWorker subscribes to promotions_mv             │
+│    (differential updates, < 2s latency)                         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. INDEX: OpenSearch                                            │
+│    Bulk upsert to "promotions" index                            │
+│    (full-text search on promo_code, store_name)                 │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. SEARCH: Agent Tool                                           │
+│    search_promotions() → OpenSearch query → Results             │
+│    Agent uses results to answer user questions                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Benefits:**
+- ✅ **Governed writes**: Ontology validates all promotion data
+- ✅ **Real-time search**: Changes appear in search within 2 seconds
+- ✅ **Computed fields**: `is_currently_valid` auto-updates as time advances
+- ✅ **Natural language**: Agents can search promotions conversationally
+- ✅ **Full-text search**: Fuzzy matching on promo codes and store names
+- ✅ **Time-aware**: Automatically filter expired promotions using `mz_now()`
+
 ### Using the Ontology to Create Business Objects
 
 The ontology allows you to **automatically discover** how to create entities:
