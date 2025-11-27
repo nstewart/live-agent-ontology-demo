@@ -136,7 +136,7 @@ class DataGenerator:
 
         # Scaled counts
         self.num_stores = max(10, int(50 * scale))
-        self.num_products = max(50, int(500 * scale))
+        self.num_products = 1000  # Always 1000 products
         self.num_customers = max(100, int(5000 * scale))
         self.num_couriers = max(20, int(200 * scale))
         self.num_orders = max(500, int(25000 * scale))
@@ -261,11 +261,12 @@ class DataGenerator:
         print(f"Generating inventory for {len(self.store_ids)} stores...")
 
         inventory_num = 1
-        products_per_store = min(len(self.product_ids), max(50, int(200 * self.scale)))
+        # All products available in all stores (1000 products per store)
+        products_per_store = len(self.product_ids)
 
         for store_id in self.store_ids:
-            # Each store carries a subset of products
-            store_products = random.sample(self.product_ids, products_per_store)
+            # Each store carries all products
+            store_products = self.product_ids
 
             for product_id in store_products:
                 inventory_id = f"inventory:INV-{inventory_num:06d}"
