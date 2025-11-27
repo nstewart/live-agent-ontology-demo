@@ -137,7 +137,7 @@ class DataGenerator:
             self.add_triple(product_id, "category", category, "string")
             self.add_triple(product_id, "unit_price", f"{price:.2f}", "float")
             self.add_triple(product_id, "unit_weight_grams", str(weight_grams), "int")
-            self.add_triple(product_id, "perishable", str(perishable).lower(), "boolean")
+            self.add_triple(product_id, "perishable", str(perishable).lower(), "bool")
 
     def generate_customers(self):
         """Generate customer entities."""
