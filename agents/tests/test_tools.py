@@ -810,3 +810,541 @@ class TestCreateOrder:
                 assert result["success"] is False
                 assert "No requested items are available" in result["error"]
                 assert "available_products" in result
+
+
+class TestSearchInventory:
+    """Tests for search_inventory tool."""
+
+    @pytest.mark.asyncio
+    async def test_searches_inventory_by_product_name(self, mock_settings):
+        """Returns products matching search query by name."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                # Mock inventory search response
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "product_id": "product:milk-1L",
+                                    "stock_level": 45,
+                                    "replenishment_eta": None,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Mock product detail response
+                mock_product_response = MagicMock()
+                mock_product_response.status_code = 200
+                mock_product_response.json.return_value = {
+                    "triples": [
+                        {"predicate": "product_name", "object_value": "Organic Whole Milk 1 Gallon"},
+                        {"predicate": "category", "object_value": "Dairy"},
+                        {"predicate": "unit_price", "object_value": "5.99"},
+                        {"predicate": "perishable", "object_value": "true"},
+                    ]
+                }
+
+                mock_client = AsyncMock()
+                # First call is inventory search, second is product detail
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.get = AsyncMock(return_value=mock_product_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "milk",
+                    "store_id": "store:BK-01",
+                })
+
+                assert len(results) == 1
+                assert results[0]["product_id"] == "product:milk-1L"
+                assert results[0]["product_name"] == "Organic Whole Milk 1 Gallon"
+                assert results[0]["category"] == "Dairy"
+                assert results[0]["unit_price"] == 5.99
+                assert results[0]["quantity_available"] == 45
+                assert results[0]["is_perishable"] is True
+
+    @pytest.mark.asyncio
+    async def test_filters_by_store_id(self, mock_settings):
+        """Queries inventory for specified store only."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {"hits": {"hits": []}}
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                await search_inventory.ainvoke({
+                    "query": "milk",
+                    "store_id": "store:MAN-01",
+                })
+
+                # Verify store_id filter in inventory query
+                call_args = mock_client.post.call_args
+                query_body = call_args.kwargs["json"]
+                must_clauses = query_body["query"]["bool"]["must"]
+                assert any(
+                    clause.get("term", {}).get("store_id") == "store:MAN-01"
+                    for clause in must_clauses
+                )
+
+    @pytest.mark.asyncio
+    async def test_searches_by_category(self, mock_settings):
+        """Matches products by category."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "product_id": "product:chicken-breast",
+                                    "stock_level": 20,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                mock_product_response = MagicMock()
+                mock_product_response.status_code = 200
+                mock_product_response.json.return_value = {
+                    "triples": [
+                        {"predicate": "product_name", "object_value": "Organic Chicken Breast"},
+                        {"predicate": "category", "object_value": "Meat"},
+                        {"predicate": "unit_price", "object_value": "8.99"},
+                    ]
+                }
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.get = AsyncMock(return_value=mock_product_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "meat",
+                    "store_id": "store:BK-01",
+                })
+
+                assert len(results) == 1
+                assert results[0]["category"] == "Meat"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_inventory(self, mock_settings):
+        """Returns empty list when store has no inventory."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {"hits": {"hits": []}}
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "milk",
+                    "store_id": "store:BK-01",
+                })
+
+                assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_respects_limit_parameter(self, mock_settings):
+        """Respects limit parameter for results."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                # Mock 5 products in inventory
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {"_source": {"product_id": f"product:item{i}", "stock_level": 10}}
+                            for i in range(5)
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                mock_product_response = MagicMock()
+                mock_product_response.status_code = 200
+                mock_product_response.json.return_value = {
+                    "triples": [
+                        {"predicate": "product_name", "object_value": "Test Product"},
+                        {"predicate": "category", "object_value": "Test"},
+                        {"predicate": "unit_price", "object_value": "1.99"},
+                    ]
+                }
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.get = AsyncMock(return_value=mock_product_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "test",
+                    "limit": 3,
+                })
+
+                # Should only return 3 results even though 5 match
+                assert len(results) == 3
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_product_details(self, mock_settings):
+        """Handles missing product details gracefully."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "product_id": "product:unknown",
+                                    "stock_level": 10,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Product detail request returns 404
+                mock_product_response = MagicMock()
+                mock_product_response.status_code = 404
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.get = AsyncMock(side_effect=httpx.HTTPError("Not found"))
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "unknown",
+                })
+
+                # Should still return result with product_id as name
+                assert len(results) == 1
+                assert results[0]["product_id"] == "product:unknown"
+                assert results[0]["product_name"] == "product:unknown"
+                assert results[0]["category"] == "Unknown"
+
+    @pytest.mark.asyncio
+    async def test_adds_warning_for_missing_price(self, mock_settings):
+        """Adds warning when product price is missing."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_inventory_response = MagicMock()
+                mock_inventory_response.json.return_value = {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_source": {
+                                    "product_id": "product:no-price",
+                                    "stock_level": 10,
+                                }
+                            }
+                        ]
+                    }
+                }
+                mock_inventory_response.raise_for_status = MagicMock()
+
+                # Product detail without price
+                mock_product_response = MagicMock()
+                mock_product_response.status_code = 200
+                mock_product_response.json.return_value = {
+                    "triples": [
+                        {"predicate": "product_name", "object_value": "Mystery Product"},
+                        {"predicate": "category", "object_value": "Unknown"},
+                    ]
+                }
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_inventory_response)
+                mock_client.get = AsyncMock(return_value=mock_product_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "mystery",
+                })
+
+                assert len(results) == 1
+                assert results[0]["unit_price"] is None
+                assert "warning" in results[0]
+                assert "Price information unavailable" in results[0]["warning"]
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Returns error on HTTP failure."""
+        with patch("src.tools.tool_search_inventory.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_search_inventory import search_inventory
+
+                results = await search_inventory.ainvoke({
+                    "query": "milk",
+                })
+
+                assert len(results) == 1
+                assert "error" in results[0]
+
+
+class TestCreateCustomer:
+    """Tests for create_customer tool."""
+
+    @pytest.mark.asyncio
+    async def test_creates_customer_with_all_fields(self, mock_settings):
+        """Creates customer with name, email, address, and home_store."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                result = await create_customer.ainvoke({
+                    "name": "John Doe",
+                    "email": "john@example.com",
+                    "address": "123 Main St, Brooklyn, NY",
+                    "home_store_id": "store:BK-01",
+                })
+
+                assert result["success"] is True
+                assert result["name"] == "John Doe"
+                assert result["email"] == "john@example.com"
+                assert result["address"] == "123 Main St, Brooklyn, NY"
+                assert result["home_store_id"] == "store:BK-01"
+                assert "customer_id" in result
+                assert result["customer_id"].startswith("customer:")
+
+                # Verify the triples posted
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+
+                # Should have 4 triples: name, email, address, home_store
+                assert len(triples) == 4
+
+                predicates = {t["predicate"] for t in triples}
+                assert "customer_name" in predicates
+                assert "customer_email" in predicates
+                assert "customer_address" in predicates
+                assert "home_store" in predicates
+
+    @pytest.mark.asyncio
+    async def test_creates_customer_with_only_required_fields(self, mock_settings):
+        """Creates customer with only name (required)."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                result = await create_customer.ainvoke({
+                    "name": "Jane Smith",
+                })
+
+                assert result["success"] is True
+                assert result["name"] == "Jane Smith"
+                assert result["email"] is None
+                assert result["address"] is None
+                assert result["home_store_id"] == "store:BK-01"  # default
+
+                # Verify the triples posted
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+
+                # Should have 2 triples: name and home_store (defaults)
+                assert len(triples) == 2
+
+                predicates = {t["predicate"] for t in triples}
+                assert "customer_name" in predicates
+                assert "home_store" in predicates
+                assert "customer_email" not in predicates
+                assert "customer_address" not in predicates
+
+    @pytest.mark.asyncio
+    async def test_generates_unique_customer_id(self, mock_settings):
+        """Generates unique customer ID for each call."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                result1 = await create_customer.ainvoke({"name": "Customer 1"})
+                result2 = await create_customer.ainvoke({"name": "Customer 2"})
+
+                assert result1["customer_id"] != result2["customer_id"]
+                assert result1["customer_id"].startswith("customer:")
+                assert result2["customer_id"].startswith("customer:")
+
+    @pytest.mark.asyncio
+    async def test_uses_correct_ontology_predicates(self, mock_settings):
+        """Uses correct ontology predicates for customer."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                await create_customer.ainvoke({
+                    "name": "Test Customer",
+                    "email": "test@example.com",
+                    "address": "123 Test St",
+                })
+
+                call_args = mock_client.post.call_args
+                triples = call_args.kwargs["json"]
+
+                # Verify correct object_type for each predicate
+                for triple in triples:
+                    if triple["predicate"] == "home_store":
+                        assert triple["object_type"] == "entity_ref"
+                    else:
+                        assert triple["object_type"] == "string"
+
+    @pytest.mark.asyncio
+    async def test_enables_validation(self, mock_settings):
+        """Enables ontology validation when creating customer."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 201
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                await create_customer.ainvoke({"name": "Test"})
+
+                # Verify validate=True in params
+                call_args = mock_client.post.call_args
+                assert call_args.kwargs["params"]["validate"] is True
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Handles HTTP errors gracefully."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                result = await create_customer.ainvoke({"name": "Test"})
+
+                assert result["success"] is False
+                assert "error" in result
+                assert "Failed to create customer" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_handles_validation_error(self, mock_settings):
+        """Handles API validation errors."""
+        with patch("src.tools.tool_create_customer.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.status_code = 400
+                mock_response.raise_for_status = MagicMock(
+                    side_effect=httpx.HTTPStatusError(
+                        "Validation failed",
+                        request=MagicMock(),
+                        response=mock_response,
+                    )
+                )
+
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_create_customer import create_customer
+
+                result = await create_customer.ainvoke({"name": "Test"})
+
+                assert result["success"] is False
+                assert "error" in result
