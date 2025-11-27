@@ -334,14 +334,6 @@ SELECT
     p.is_active,
     s.store_name,
     s.store_zone,
-    -- Computed: Is promotion currently valid?
-    CASE
-        WHEN p.is_active
-             AND mz_now() >= p.valid_from
-             AND mz_now() <= p.valid_until
-        THEN TRUE
-        ELSE FALSE
-    END AS is_currently_valid,
     p.effective_updated_at
 FROM promotions_flat p
 LEFT JOIN stores_flat s ON s.store_id = p.store_id;
@@ -350,6 +342,8 @@ LEFT JOIN stores_flat s ON s.store_id = p.store_id;
 CREATE MATERIALIZED VIEW promotions_mv IN CLUSTER compute AS
 SELECT * FROM promotions_enriched;
 ```
+
+**Note on `mz_now()` restriction**: We **cannot** use `mz_now()` in a CASE expression or SELECT clause - it can only be used in WHERE/HAVING clauses for temporal filtering. The `is_currently_valid` field will be computed at sync time in the worker (see Step 6) instead of in the materialized view.
 
 **3c. Create Index (IN CLUSTER serving)**
 
@@ -587,23 +581,37 @@ class PromotionsSyncWorker(BaseSubscribeWorker):
 
     def transform_event_to_doc(self, data: dict) -> Optional[dict]:
         """Transform Materialize event to OpenSearch document."""
+        from datetime import datetime, timezone
+
         doc_id = self.get_doc_id(data)
         if not doc_id:
             return None
 
         # Parse dates safely
-        valid_from = data.get("valid_from")
-        valid_until = data.get("valid_until")
+        valid_from_str = data.get("valid_from")
+        valid_until_str = data.get("valid_until")
+        is_active = data.get("is_active")
+
+        # Compute is_currently_valid at sync time (mz_now() cannot be in SELECT)
+        is_currently_valid = False
+        if is_active and valid_from_str and valid_until_str:
+            try:
+                now = datetime.now(timezone.utc)
+                valid_from = datetime.fromisoformat(valid_from_str.replace('Z', '+00:00'))
+                valid_until = datetime.fromisoformat(valid_until_str.replace('Z', '+00:00'))
+                is_currently_valid = valid_from <= now <= valid_until
+            except (ValueError, AttributeError):
+                pass
 
         return {
             "promo_id": doc_id,
             "promo_code": data.get("promo_code"),
             "discount_percent": float(data.get("discount_percent", 0)),
-            "valid_from": valid_from,
-            "valid_until": valid_until,
+            "valid_from": valid_from_str,
+            "valid_until": valid_until_str,
             "store_id": data.get("store_id"),
-            "is_active": data.get("is_active"),
-            "is_currently_valid": data.get("is_currently_valid"),
+            "is_active": is_active,
+            "is_currently_valid": is_currently_valid,  # Computed here, not in Materialize
             "store_name": data.get("store_name"),
             "store_zone": data.get("store_zone"),
             "effective_updated_at": data.get("effective_updated_at"),
@@ -842,7 +850,7 @@ until August 31st. Would you like me to apply it to an order?
 ┌─────────────────────────────────────────────────────────────────┐
 │ 3. TRANSFORM: Materialize Views                                 │
 │    promotions_flat → promotions_enriched → promotions_mv        │
-│    (computed: is_currently_valid using mz_now())                │
+│    (stores timestamps for validity checking)                    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
@@ -852,8 +860,9 @@ until August 31st. Would you like me to apply it to an order?
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ 5. INDEX: OpenSearch                                            │
-│    Bulk upsert to "promotions" index                            │
+│ 5. COMPUTE & INDEX: Sync Worker → OpenSearch                   │
+│    Worker computes is_currently_valid at sync time              │
+│    Bulk upsert to "promotions" index with computed field        │
 │    (full-text search on promo_code, store_name)                 │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -867,10 +876,10 @@ until August 31st. Would you like me to apply it to an order?
 **Key Benefits:**
 - ✅ **Governed writes**: Ontology validates all promotion data
 - ✅ **Real-time search**: Changes appear in search within 2 seconds
-- ✅ **Computed fields**: `is_currently_valid` auto-updates as time advances
+- ✅ **Computed at sync time**: `is_currently_valid` computed by sync worker
 - ✅ **Natural language**: Agents can search promotions conversationally
 - ✅ **Full-text search**: Fuzzy matching on promo codes and store names
-- ✅ **Time-aware**: Automatically filter expired promotions using `mz_now()`
+- ✅ **Time-aware filtering**: Use `mz_now()` in WHERE clauses for temporal views
 
 ### Using the Ontology to Create Business Objects
 
@@ -938,21 +947,31 @@ POST /triples/validate
 
 #### Pattern 1: Time-Sensitive Data (Active Promotions, Scheduled Tasks)
 
-Use `mz_now()` for time-based logic:
+Use `mz_now()` in WHERE clauses for time-based filtering:
 
 ```sql
+-- Materialized view of currently valid promotions
 CREATE MATERIALIZED VIEW active_promotions_mv IN CLUSTER compute AS
 SELECT
     promo_id,
     promo_code,
-    discount_percent
+    discount_percent,
+    valid_from,
+    valid_until
 FROM promotions_flat
 WHERE is_active = TRUE
   AND mz_now() >= valid_from
   AND mz_now() <= valid_until;
+
+-- Index it for fast queries
+CREATE INDEX active_promotions_idx IN CLUSTER serving ON active_promotions_mv (promo_id);
 ```
 
-**Important**: `mz_now()` can only appear in `WHERE` or `HAVING` clauses, never in `SELECT`.
+**Important**: `mz_now()` can **only** appear in `WHERE` or `HAVING` clauses for temporal filtering. It **cannot** be used in:
+- ❌ SELECT clauses
+- ❌ CASE expressions
+- ❌ Computed columns
+- ✅ WHERE/HAVING for filtering rows based on time
 
 #### Pattern 2: Aggregations (Order Counts, Inventory Summaries)
 
