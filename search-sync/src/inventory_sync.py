@@ -1,7 +1,7 @@
 """Inventory sync worker - syncs store_inventory_mv to OpenSearch using SUBSCRIBE streaming.
 
 This worker extends BaseSubscribeWorker to sync inventory data from Materialize
-to OpenSearch with real-time streaming and simple insert/delete processing.
+to OpenSearch with real-time streaming and UPDATE consolidation.
 
 Architecture:
     PostgreSQL → Materialize (CDC) → SUBSCRIBE Stream → Worker → OpenSearch
@@ -9,7 +9,7 @@ Architecture:
 
 Key Features:
     - Real-time streaming with < 2 second latency
-    - Simple insert/delete processing (no consolidation needed)
+    - UPDATE consolidation (DELETE + INSERT at same timestamp = UPDATE)
     - Enriched inventory with product and store denormalization
     - Ingredient-aware search with synonyms (milk, whole milk, etc.)
 
@@ -116,18 +116,19 @@ INVENTORY_INDEX_MAPPING = {
 class InventorySyncWorker(BaseSubscribeWorker):
     """Worker that syncs inventory from Materialize to OpenSearch.
 
-    Extends BaseSubscribeWorker with inventory-specific transformation logic.
-    Uses simple insert/delete processing without consolidation since inventory
-    updates are typically full replacements rather than incremental updates.
+    Extends BaseSubscribeWorker with inventory-specific transformation logic
+    and UPDATE consolidation for efficient handling of cascading updates from
+    denormalized product and store data.
 
     Configuration:
         - View: store_inventory_mv
         - Index: inventory
-        - Consolidation: Disabled (simple processing)
+        - Consolidation: Enabled (DELETE + INSERT = UPDATE)
 
     The worker syncs enriched inventory data with denormalized product and
     store information for efficient searching by product name, category,
-    and location.
+    and location. When product prices or store details change, inventory
+    records are updated via consolidated upserts rather than delete+insert.
     """
 
     def get_view_name(self) -> str:
@@ -139,13 +140,17 @@ class InventorySyncWorker(BaseSubscribeWorker):
         return "inventory"
 
     def should_consolidate_events(self) -> bool:
-        """Disable UPDATE consolidation for inventory.
+        """Enable UPDATE consolidation for inventory.
 
-        Inventory updates are typically full record replacements (stock level
-        changes, replenishment updates), so simple insert/delete processing
-        is sufficient and more efficient.
+        Inventory records can be updated when underlying product or store data
+        changes (e.g., product price updates, store information changes). By
+        consolidating DELETE + INSERT at the same timestamp into a single UPDATE,
+        we reduce OpenSearch operations and maintain consistency.
+
+        This matches the pattern used by orders_sync and ensures efficient
+        handling of cascading updates from denormalized data.
         """
-        return False
+        return True
 
     def get_index_mapping(self) -> dict:
         """Return OpenSearch index mapping for inventory."""

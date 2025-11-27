@@ -569,17 +569,7 @@ class BaseSubscribeWorker(ABC):
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                # Flush deletes FIRST (must happen before upserts for UPDATE handling)
-                if deletes_to_flush:
-                    success, errors = await self.os.bulk_delete(
-                        index_name,
-                        deletes_to_flush
-                    )
-                    logger.info(f"Delete result: {success} succeeded, {errors} errors")
-                    if errors > 0:
-                        logger.warning(f"{errors} documents failed to delete")
-
-                # Flush upserts SECOND (after deletes)
+                # Flush upserts first
                 if upserts_to_flush:
                     success, errors = await self.os.bulk_upsert(
                         index_name,
@@ -588,6 +578,16 @@ class BaseSubscribeWorker(ABC):
                     logger.info(f"Upsert result: {success} succeeded, {errors} errors")
                     if errors > 0:
                         logger.warning(f"{errors} documents failed to upsert")
+
+                # Flush deletes second
+                if deletes_to_flush:
+                    success, errors = await self.os.bulk_delete(
+                        index_name,
+                        deletes_to_flush
+                    )
+                    logger.info(f"Delete result: {success} succeeded, {errors} errors")
+                    if errors > 0:
+                        logger.warning(f"{errors} documents failed to delete")
 
                 # Success
                 self.events_processed += upsert_count + delete_count
