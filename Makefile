@@ -64,6 +64,13 @@ up:
 	docker-compose build web zero-permissions
 	docker-compose up -d
 	@echo ""
+	@echo "Waiting for databases to be ready..."
+	@sleep 5
+	@echo "Running migrations..."
+	@$(MAKE) migrate
+	@echo "Loading seed data..."
+	@$(MAKE) seed
+	@echo ""
 	@echo "Services starting..."
 	@echo "  - API:        http://localhost:$${API_PORT:-8080}"
 	@echo "  - Web UI:     http://localhost:$${WEB_PORT:-5173}"
@@ -80,7 +87,14 @@ up-agent:
 	docker-compose build web zero-permissions
 	docker-compose --profile agent up -d
 	@echo ""
-	@echo "Waiting for services to be ready..."
+	@echo "Waiting for databases to be ready..."
+	@sleep 5
+	@echo "Running migrations..."
+	@$(MAKE) migrate
+	@echo "Loading seed data..."
+	@$(MAKE) seed
+	@echo ""
+	@echo "Waiting for agent services to be ready..."
 	@sleep 3
 	@echo ""
 	@echo "Initializing agent checkpointer..."

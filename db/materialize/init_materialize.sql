@@ -109,7 +109,9 @@ WHERE subject_id LIKE 'product:%'
 GROUP BY subject_id;
 
 -- Materialized view with product and store enrichment for OpenSearch
-CREATE MATERIALIZED VIEW IF NOT EXISTS store_inventory_mv IN CLUSTER compute AS
+-- Drop first to ensure schema updates are applied
+DROP MATERIALIZED VIEW IF EXISTS store_inventory_mv CASCADE;
+CREATE MATERIALIZED VIEW store_inventory_mv IN CLUSTER compute AS
 SELECT
     inv.inventory_id,
     inv.store_id,

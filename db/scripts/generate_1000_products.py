@@ -1018,8 +1018,12 @@ def generate_sql(products, stores):
 
     triples = []
     for product in products:
-        triples.append(f"    ('{product['id']}', 'product_name', '{product['name']}', 'string')")
-        triples.append(f"    ('{product['id']}', 'category', '{product['category']}', 'string')")
+        # Escape apostrophes in string values for SQL
+        name_escaped = product['name'].replace("'", "''")
+        category_escaped = product['category'].replace("'", "''")
+
+        triples.append(f"    ('{product['id']}', 'product_name', '{name_escaped}', 'string')")
+        triples.append(f"    ('{product['id']}', 'category', '{category_escaped}', 'string')")
         triples.append(f"    ('{product['id']}', 'perishable', '{'true' if product['perishable'] else 'false'}', 'bool')")
         triples.append(f"    ('{product['id']}', 'unit_weight_grams', '{product['weight']}', 'int')")
         triples.append(f"    ('{product['id']}', 'unit_price', '{product['price']:.2f}', 'float')")
