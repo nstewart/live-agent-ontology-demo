@@ -22,7 +22,7 @@ export PGPASSWORD=$PG_PASSWORD
 
 echo "Seeding demo data into $PG_HOST:$PG_PORT/$PG_DATABASE..."
 
-# Run seed files in order
+# Run ontology seed files first
 for seed in "$SCRIPT_DIR/../seed"/*.sql; do
     if [ -f "$seed" ]; then
         filename=$(basename "$seed")
@@ -31,16 +31,8 @@ for seed in "$SCRIPT_DIR/../seed"/*.sql; do
     fi
 done
 
-# Refresh Materialize views
-MZ_HOST=${MZ_HOST:-localhost}
-MZ_PORT=${MZ_PORT:-6875}
-MZ_USER=${MZ_USER:-materialize}
-MZ_PASSWORD=${MZ_PASSWORD:-materialize}
-MZ_DATABASE=${MZ_DATABASE:-materialize}
-
-export PGPASSWORD=$MZ_PASSWORD
-
-echo "Refreshing Materialize views..."
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U "$MZ_USER" -d "$MZ_DATABASE" -c "SELECT refresh_all_views();" 2>/dev/null || echo "Note: Materialize refresh skipped (service may not be ready)"
+# Generate representative operational data with scale factor 0.01
+echo "Generating demo operational data (scale=0.01)..."
+python3 "$SCRIPT_DIR/generate_load_test_data.py" --scale 0.01
 
 echo "Seed complete!"
