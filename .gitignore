@@ -28,6 +28,8 @@ wheels/
 .coverage
 htmlcov/
 .ruff_cache/
+.venv/
+venv/
 
 # Node
 node_modules/

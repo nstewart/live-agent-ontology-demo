@@ -44,6 +44,27 @@ services:
       retries: 30
       start_period: 30s
 
+  # Materialize Initialization Service
+  # This runs the init.sh script to create sources, views, and indexes
+  # It must complete before search-sync starts to ensure views exist for hydration
+  materialize-init:
+    image: postgres:15-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+      mz:
+        condition: service_healthy
+    environment:
+      - MZ_HOST=mz
+      - MZ_PORT=6875
+      - MZ_USER=materialize
+      - MZ_PASSWORD=materialize
+      - MZ_DATABASE=materialize
+    volumes:
+      - ./db/materialize/init.sh:/init.sh:ro
+    command: sh -c "/init.sh"
+    restart: "no"
+
   zero-cache:
       image: rocicorp/zero:0.24.3000000000
       restart: always
@@ -200,6 +221,8 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
+      materialize-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     volumes:
       - ./search-sync:/app:cached
@@ -235,6 +258,7 @@ services:
       - AGENT_OS_BASE=http://opensearch:9200
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o}
     ports:
       - "${AGENT_PORT:-8081}:8081"
     depends_on:

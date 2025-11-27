@@ -5,9 +5,29 @@ A forkable, batteries-included repository demonstrating how to build a **digital
 - **PostgreSQL** as a triple store with ontology validation
 - **Materialize** for real-time materialized views with admin console
 - **Zero WebSocket Server** for real-time UI updates via Materialize SUBSCRIBE
-- **OpenSearch** for full-text search and discovery
-- **LangGraph Agents** with tools for AI-powered operations assistance
+- **OpenSearch** for full-text search and discovery (orders + inventory indexes)
+- **LangGraph Agents** with tools for AI-powered operations (search, create customers/orders, update status)
 - **React Admin UI** with real-time updates for managing operations
+
+## Architecture Pattern: CQRS
+
+This system implements **CQRS (Command Query Responsibility Segregation)** to separate write and read concerns:
+
+**Commands (Writes)**:
+- All modifications flow through the **PostgreSQL triple store** as RDF-style subject-predicate-object statements
+- Writes are validated against the **ontology schema** (classes, properties, ranges, domains)
+- This ensures data integrity and semantic consistency at write time
+
+**Queries (Reads)**:
+- Read operations use **Materialize materialized views** that are pre-computed, denormalized, and indexed
+- Views are maintained in real-time via **Change Data Capture (CDC)** from PostgreSQL
+- Optimized for fast queries without impacting write performance
+
+**Benefits**:
+- **Write model**: Enforces schema through ontology, maintains graph relationships
+- **Read model**: Optimized for specific query patterns (orders, inventory, customer lookups)
+- **Real-time consistency**: CDC ensures views reflect writes within milliseconds
+- **Scalability**: Independent scaling of write (PostgreSQL) and read (Materialize) workloads
 
 ## Quick Start
 
@@ -38,7 +58,7 @@ The system will automatically:
 - Run database migrations
 - Seed demo data (5 stores, 15 products, 15 customers, 20 orders)
 - Initialize Materialize (sources, views, indexes)
-- Sync orders to OpenSearch
+- Sync orders and inventory to OpenSearch
 
 **Note:** `zero-server` and `search-sync` start immediately and automatically connect to Materialize when it's ready. You may see retry messages in the logs - this is normal during initialization. Services will be fully operational within 30 seconds.
 
@@ -98,8 +118,10 @@ You can verify the setup by visiting the Materialize Console at http://localhost
                                      ┌────────────▼────────────────────────┐
                                      │    Search Sync Worker                │
                                      │  SUBSCRIBE streaming                 │
-                                     │  • Differential updates              │
-                                     │  • Bulk upsert/delete                │
+                                     │  • OrdersSyncWorker (orders)         │
+                                     │  • InventorySyncWorker (inventory)   │
+                                     │  • BaseSubscribeWorker pattern       │
+                                     │  • Event consolidation               │
                                      │  • < 2s latency                      │
                                      └────────────┬────────────────────────┘
                                                   │ Bulk index
@@ -108,13 +130,15 @@ You can verify the setup by visiting the Materialize Console at http://localhost
                     │      OpenSearch                     │
            ┌───────▶│       Port: 9200                    │
            │        │  • orders index (real-time)         │
+           │        │  • inventory index (real-time)      │
            │        │  • Full-text search                 │
            │        └─────────────────────────────────────┘
            │
 ┌──────────┴───────────────┐
 │    LangGraph Agents       │
 │      Port: 8081           │
-│  • search_orders  ────────┘ (search OpenSearch)
+│  • search_orders  ────────┘ (search orders index)
+│  • search_inventory ─────┘ (search inventory index)
 │  • fetch_order_context ─────▶ Graph API (read triples)
 │  • write_triples ───────────▶ Graph API (write triples → PostgreSQL)
 └──────────────────────────┘
@@ -274,49 +298,77 @@ Visit **http://localhost:8080/docs** for interactive Swagger UI with:
 
 ### Real-Time Search Sync
 
-The search-sync worker uses **Materialize SUBSCRIBE streaming** to maintain real-time synchronization between PostgreSQL (source of truth) and OpenSearch (search index). This replaces the previous inefficient polling mechanism.
+The search-sync worker uses **Materialize SUBSCRIBE streaming** to maintain real-time synchronization between PostgreSQL (source of truth) and OpenSearch (search indexes). It syncs two materialized views to OpenSearch:
 
-**Startup Process:**
-1. **Initial Hydration**: On startup, search-sync queries all existing orders from Materialize and bulk loads them into OpenSearch
-2. **Real-Time Streaming**: After hydration, SUBSCRIBE takes over for incremental updates
-3. **Result**: OpenSearch starts fully synced and stays up-to-date with < 2 second latency
+- **orders_search_source_mv** → `orders` index (enriched order data with customer, store, delivery details, and line items)
+- **store_inventory_mv** → `inventory` index (denormalized inventory with product and store details, ingredient-aware search)
 
 **Architecture Pattern**:
 ```
 PostgreSQL → Materialize CDC → SUBSCRIBE Stream → Search Sync Worker → OpenSearch
-   (write)      (real-time)      (differential)      (bulk ops)          (search)
+   (write)      (real-time)      (differential)      (bulk ops)       (orders + inventory indexes)
+```
+
+**Unified BaseSubscribeWorker Architecture**:
+
+Both workers extend a common `BaseSubscribeWorker` abstract class that provides:
+- SUBSCRIBE connection management with exponential backoff retry
+- Initial hydration via SELECT query
+- Real-time streaming with timestamp-based batching
+- Event consolidation for efficient UPDATE handling
+- Bulk upsert/delete operations to OpenSearch
+- Backpressure monitoring and metrics
+
+Workers customize behavior through 5 abstract methods:
+```python
+def get_view_name() -> str          # Materialize view to subscribe to
+def get_index_name() -> str         # OpenSearch index name
+def get_index_mapping() -> dict     # Index mapping configuration
+def get_doc_id(data: dict) -> str   # Extract document ID
+def transform_event_to_doc(data: dict) -> dict  # Transform to OpenSearch doc
+def should_consolidate_events() -> bool  # Enable UPDATE consolidation
 ```
 
 **How SUBSCRIBE Streaming Works**:
 
-1. **Connection**: Worker establishes a persistent SUBSCRIBE connection to `orders_search_source_mv`
-2. **Snapshot Handling**: Initial snapshot is discarded (upserts are idempotent, index already populated)
-3. **Differential Updates**: Materialize streams inserts (`mz_diff=+1`) and deletes (`mz_diff=-1`)
-4. **Timestamp Batching**: Events accumulate until timestamp advances, then flush in bulk
-5. **Event Consolidation**: DELETE + INSERT at same timestamp → consolidated into UPDATE operation
-6. **Bulk Operations**: Worker performs bulk upsert/delete operations to OpenSearch
-7. **Progress Tracking**: `PROGRESS` option ensures regular timestamp updates even with no data changes
+1. **Initial Hydration**: On startup, query all existing records from Materialize and bulk load into OpenSearch
+2. **SUBSCRIBE Connection**: Establish persistent connection to materialized view
+3. **Snapshot Handling**: Discard initial snapshot (index already hydrated)
+4. **Differential Updates**: Stream inserts (`mz_diff=+1`) and deletes (`mz_diff=-1`)
+5. **Timestamp Batching**: Accumulate events until timestamp advances
+6. **Event Consolidation**: DELETE + INSERT at same timestamp → single UPDATE operation
+7. **Bulk Flush**: Execute bulk upsert/delete to OpenSearch
+8. **Result**: < 2 second end-to-end latency for all changes
 
-**Event Consolidation Pattern** (Critical Fix):
+**Event Consolidation Pattern**:
 
-Materialize emits UPDATE operations as DELETE + INSERT pairs at the **same timestamp**. To prevent spurious deletes in downstream systems (Zero cache, OpenSearch), both implementations check if timestamp **increased** (`>` comparison) **BEFORE** adding events to the pending batch. This ensures all events at timestamp X are consolidated before broadcasting.
+Both workers use consolidation to handle UPDATEs efficiently. When Materialize emits a DELETE + INSERT at the same timestamp (e.g., product price update affecting inventory):
 
-**Implementation Details**:
-- TypeScript: `zero-server/src/materialize-backend.ts:147-161`
-- Python: `search-sync/src/mz_client_subscribe.py:334-350`
-- Tests: `search-sync/tests/test_subscribe_consolidation.py`
+```python
+# Without consolidation: 2 operations
+DELETE inventory:INV-001  # Remove old record
+INSERT inventory:INV-001  # Add new record
+
+# With consolidation: 1 operation
+net_diff = -1 + 1 = 0     # DELETE + INSERT = UPDATE
+→ UPSERT inventory:INV-001 (only latest data sent to OpenSearch)
+```
+
+This prevents spurious deletes and reduces OpenSearch operations by 50% for updates.
 
 **Performance Improvements**:
-- **Latency**: Reduced from 20+ seconds (polling every 5s) to < 2 seconds end-to-end
+- **Latency**: < 2 seconds end-to-end (PostgreSQL write → OpenSearch search)
+- **Efficiency**: UPDATE = 1 upsert (not delete + upsert)
 - **Resource Usage**: 50% reduction in CPU/memory vs polling loops
 - **Consistency**: Guaranteed eventual consistency via Materialize's differential dataflow
 - **Scalability**: Single worker handles 10,000+ events/second with sub-second latency
 
 **Key Features**:
+- **Dual Index Sync**: Orders and inventory indexes maintained independently
 - **Automatic Recovery**: Exponential backoff reconnection (1s → 30s max)
-- **Backpressure Handling**: Pauses streaming when buffer exceeds 5000 events
+- **Backpressure Handling**: Monitors buffer size, warns when exceeds 5000 events
 - **Idempotent Operations**: Safe to replay events, no duplicate index entries
-- **Structured Logging**: JSON logs for monitoring and debugging
+- **Structured Logging**: JSON logs with operation metrics for monitoring
 
 ## Services
 
@@ -328,7 +380,7 @@ Materialize emits UPDATE operations as DELETE + INSERT pairs at the **same times
 | **zero-server** | 8090 | WebSocket server for real-time UI updates |
 | **opensearch** | 9200 | Search engine for orders |
 | **api** | 8080 | FastAPI backend |
-| **search-sync** | - | SUBSCRIBE streaming worker for OpenSearch sync (< 2s latency) |
+| **search-sync** | - | Dual SUBSCRIBE workers (orders + inventory) for OpenSearch sync (< 2s latency) |
 | **web** | 5173 | React admin UI with real-time updates |
 | **agents** | 8081 | LangGraph agent runner (optional) |
 
@@ -480,12 +532,32 @@ GET /stats
 
 ## Using the Agent
 
-The LangGraph-powered ops assistant can:
-- Search for orders by customer name, address, or order number
-- Fetch detailed order context
-- Update order status
-- Query the ontology
+The LangGraph-powered ops assistant provides AI-powered operations support with these capabilities:
+
+**Order Management:**
+- **Search orders** by customer name, address, order number, or status (searches OpenSearch `orders` index)
+- **Fetch order details** with full context including line items, customer info, delivery tasks
+- **Update order status** (CREATED → PICKING → OUT_FOR_DELIVERY → DELIVERED)
+
+**Inventory & Product Discovery:**
+- **Search inventory** by product name, category, store, or availability (searches OpenSearch `inventory` index)
+- Find products across stores with real-time stock levels
+- Ingredient-aware search with synonyms (e.g., "milk" finds whole milk, 2% milk, skim milk)
+
+**Customer & Order Creation:**
+- **Create new customers** with name, email, address, and phone
+- **Create complete orders** with customer selection, store selection, and multiple line items
+- Automatically validates product availability and inventory at selected store
+
+**Knowledge Graph Operations:**
+- **Query the ontology** to understand entity types and properties
+- **Write triples** directly to the knowledge graph for custom updates
+- Read any entity's full context from the triple store
+
+**Conversational Memory:**
 - **Remember conversation context** across multiple messages using PostgreSQL-backed checkpointing
+- Maintains session state for natural follow-up questions
+- References previous searches and entities mentioned in conversation
 
 ### Prerequisites
 
@@ -527,6 +599,8 @@ docker-compose exec agents python -m src.main check
 docker-compose exec -it agents python -m src.main chat
 
 # Example conversation with memory:
+
+# Search and update existing orders
 > Find orders for Lisa
 Assistant: I found 2 orders for customers named Lisa...
 
@@ -536,8 +610,16 @@ Assistant: Based on the previous search for Lisa, here are her OUT_FOR_DELIVERY 
 > Mark order FM-1001 as DELIVERED
 Assistant: I'll update order FM-1001 to DELIVERED status...
 
-> What's the status now?
-Assistant: Order FM-1001 is now DELIVERED (referring to the order just updated)
+# Search inventory
+> Find stores with milk in stock
+Assistant: I found milk available at 5 stores: FreshMart Brooklyn 1 (87 units), FreshMart Manhattan 2 (52 units)...
+
+# Create new customer and order
+> Create a new customer named John Smith, email john@example.com
+Assistant: I've created customer John Smith with ID customer:12345
+
+> Create an order for John at Brooklyn store with 2 gallons of milk and 1 dozen eggs
+Assistant: I've created order FM-1235 for John Smith at FreshMart Brooklyn 1 with 2 items totaling $15.98
 ```
 
 **Memory Features:**
@@ -550,6 +632,13 @@ Assistant: Order FM-1001 is now DELIVERED (referring to the order just updated)
 ```bash
 # Single query (creates a one-time thread_id)
 docker-compose exec agents python -m src.main chat "Show all orders at BK-01 that are out for delivery"
+
+# Search inventory
+docker-compose exec agents python -m src.main chat "Find stores with organic milk in stock"
+
+# Create customer and order
+docker-compose exec agents python -m src.main chat "Create a customer named Jane Doe with email jane@example.com"
+docker-compose exec agents python -m src.main chat "Create an order for Jane at Manhattan store with milk and eggs"
 
 # Continue a conversation across multiple commands with --thread-id
 docker-compose exec agents python -m src.main chat --thread-id my-session "Find orders for Lisa"
@@ -564,12 +653,29 @@ The agent also exposes an HTTP API on port 8081:
 # Health check
 curl http://localhost:8081/health
 
-# Chat with the agent (thread_id generated automatically)
+# Search orders
 curl -X POST http://localhost:8081/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Show all OUT_FOR_DELIVERY orders"}'
 
-# Continue a conversation by providing thread_id
+# Search inventory
+curl -X POST http://localhost:8081/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Find stores with organic milk in stock"}'
+
+# Create customer and order
+curl -X POST http://localhost:8081/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Create a customer named John Smith with email john@example.com"}'
+
+curl -X POST http://localhost:8081/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Create an order for John at Brooklyn store with milk and eggs",
+    "thread_id": "user-123-session"
+  }'
+
+# Conversational context with thread_id
 curl -X POST http://localhost:8081/chat \
   -H "Content-Type: application/json" \
   -d '{
@@ -580,7 +686,7 @@ curl -X POST http://localhost:8081/chat \
 curl -X POST http://localhost:8081/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "Show me her orders",
+    "message": "Show me her orders that are out for delivery",
     "thread_id": "user-123-session"
   }'
 ```
@@ -779,7 +885,9 @@ docker-compose logs -f search-sync | grep "SUBSCRIBE"
 
 # Expected healthy output:
 # "Starting SUBSCRIBE for view: orders_search_source_mv"
+# "Starting SUBSCRIBE for view: store_inventory_mv"
 # "Broadcasting N changes for orders_search_source_mv"
+# "Broadcasting N changes for store_inventory_mv"
 
 # View zero-server logs for SUBSCRIBE activity
 docker-compose logs -f zero-server | grep -E "Starting SUBSCRIBE|Broadcasting"
@@ -793,11 +901,17 @@ docker-compose logs -f zero-server | grep -E "Starting SUBSCRIBE|Broadcasting"
 #### Verify Sync Latency
 
 ```bash
-# Create a test order
+# Test orders sync - Create a test order
 curl -X POST http://localhost:8080/freshmart/orders ...
 
-# Immediately search for it (should appear within 2 seconds)
+# Search for it (should appear within 2 seconds)
 curl 'http://localhost:9200/orders/_search?q=order_number:FM-1234'
+
+# Test inventory sync - Update a product price
+curl -X PATCH http://localhost:8080/triples/{triple_id} -d '{"object_value": "9.99"}'
+
+# Search for updated inventory (should appear within 2 seconds)
+curl 'http://localhost:9200/inventory/_search?q=product_name:Milk'
 
 # Check timestamp of last sync
 docker-compose logs --tail=50 search-sync | grep "Broadcasting"
@@ -816,6 +930,8 @@ docker-compose ps mz
 # Check if views exist (if "unknown catalog item" error)
 PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -d materialize \
   -c "SET CLUSTER = serving; SHOW MATERIALIZED VIEWS;"
+
+# Should see both: orders_search_source_mv, store_inventory_mv
 
 # If views missing, initialize Materialize
 make init-mz
@@ -843,12 +959,21 @@ PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -c \
 **OpenSearch Index Drift**:
 ```bash
 # Compare counts between Materialize and OpenSearch
-MZ_COUNT=$(PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -t -c \
-  "SET CLUSTER = serving; SELECT COUNT(*) FROM orders_search_source_mv;")
-OS_COUNT=$(curl -s 'http://localhost:9200/orders/_count' | jq '.count')
-echo "Materialize: $MZ_COUNT, OpenSearch: $OS_COUNT"
 
-# If drift detected, trigger manual resync (see operations runbook)
+# Orders index
+MZ_ORDERS=$(PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -t -c \
+  "SET CLUSTER = serving; SELECT COUNT(*) FROM orders_search_source_mv;")
+OS_ORDERS=$(curl -s 'http://localhost:9200/orders/_count' | jq '.count')
+echo "Orders - Materialize: $MZ_ORDERS, OpenSearch: $OS_ORDERS"
+
+# Inventory index
+MZ_INVENTORY=$(PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -t -c \
+  "SET CLUSTER = serving; SELECT COUNT(*) FROM store_inventory_mv;")
+OS_INVENTORY=$(curl -s 'http://localhost:9200/inventory/_count' | jq '.count')
+echo "Inventory - Materialize: $MZ_INVENTORY, OpenSearch: $OS_INVENTORY"
+
+# If drift detected, restart search-sync to re-hydrate
+docker-compose restart search-sync
 ```
 
 **Memory/Buffer Issues**:
@@ -1038,11 +1163,13 @@ freshmart-digital-twin-agent-starter/
 │       ├── test_freshmart_service_integration.py  # PG/MZ integration tests
 │       └── ...                # Unit and API tests
 │
-├── search-sync/               # OpenSearch sync worker
+├── search-sync/               # OpenSearch sync workers
 │   └── src/
-│       ├── mz_client.py       # Materialize queries
-│       ├── opensearch_client.py
-│       └── orders_sync.py     # Sync logic
+│       ├── base_subscribe_worker.py  # Abstract base class (619 lines)
+│       ├── orders_sync.py     # Orders sync worker (extends base)
+│       ├── inventory_sync.py  # Inventory sync worker (extends base)
+│       ├── mz_client_subscribe.py  # Materialize SUBSCRIBE client
+│       └── opensearch_client.py    # OpenSearch bulk operations
 │
 ├── zero-server/               # WebSocket server for real-time UI updates
 │   └── src/
