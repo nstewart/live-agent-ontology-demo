@@ -22,6 +22,7 @@ async def search_orders(
     - Customer address (partial match)
     - Order number (e.g., "FM-1001")
     - Store name or zone
+    - Promotion code (e.g., "SUMMER25")
 
     Args:
         query: Natural language search query
@@ -32,6 +33,7 @@ async def search_orders(
         List of matching orders with full details including:
         - Customer and store information
         - Order status and delivery windows
+        - Promotion information (code, discount, discounted total)
         - Line items with product names, quantities, and prices
         - Line item count and perishable flags
     """
@@ -53,6 +55,7 @@ async def search_orders(
                     "fields": [
                         "order_number^3",
                         "customer_name^2",
+                        "promo_code^2",
                         "customer_address",
                         "store_name",
                         "store_zone",
@@ -102,6 +105,9 @@ async def search_orders(
                     "delivery_window_start": hit["_source"].get("delivery_window_start"),
                     "delivery_window_end": hit["_source"].get("delivery_window_end"),
                     "order_total_amount": hit["_source"].get("order_total_amount"),
+                    "promo_code": hit["_source"].get("promo_code"),
+                    "discount_percent": hit["_source"].get("discount_percent"),
+                    "order_total_amount_with_discounts": hit["_source"].get("order_total_amount_with_discounts"),
                     "line_items": hit["_source"].get("line_items", []),
                     "line_item_count": hit["_source"].get("line_item_count", 0),
                     "has_perishable_items": hit["_source"].get("has_perishable_items"),
