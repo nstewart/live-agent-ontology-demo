@@ -339,11 +339,14 @@ FROM promotions_flat p
 LEFT JOIN stores_flat s ON s.store_id = p.store_id;
 
 -- Materialize the enriched view (no duplication!)
+-- IMPORTANT: Must be IN CLUSTER compute for cross-cluster materialization
 CREATE MATERIALIZED VIEW promotions_mv IN CLUSTER compute AS
 SELECT * FROM promotions_enriched;
 ```
 
-**Note on `mz_now()` restriction**: We **cannot** use `mz_now()` in a CASE expression or SELECT clause - it can only be used in WHERE/HAVING clauses for temporal filtering. The `is_currently_valid` field will be computed at sync time in the worker (see Step 6) instead of in the materialized view.
+**Important Notes:**
+- **`IN CLUSTER compute`** is required because the serving cluster (where indexes live) will read from this materialized view. Materialized views must be created in a compute cluster to be consumed by other clusters.
+- **`mz_now()` restriction**: We **cannot** use `mz_now()` in a CASE expression or SELECT clause - it can only be used in WHERE/HAVING clauses for temporal filtering. The `is_currently_valid` field will be computed at sync time in the worker (see Step 6) instead of in the materialized view.
 
 **3c. Create Index (IN CLUSTER serving)**
 
