@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ontologyApi, OntologyProperty, OntologyPropertyCreate, OntologyClass } from '../api/client'
-import { ArrowRight, Plus, Edit2, Trash2, X } from 'lucide-react'
+import { ArrowRight, Plus, Edit2, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
 
 const rangeKindOptions = ['string', 'int', 'float', 'bool', 'timestamp', 'date', 'entity_ref']
 
@@ -32,6 +32,7 @@ function PropertyFormModal({
   onSave,
   isLoading,
   classes,
+  presetDomainClassId,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -39,6 +40,7 @@ function PropertyFormModal({
   onSave: (data: PropertyFormData, isEdit: boolean) => void
   isLoading: boolean
   classes: OntologyClass[]
+  presetDomainClassId?: number
 }) {
   const [formData, setFormData] = useState<PropertyFormData>(initialFormData)
 
@@ -54,9 +56,12 @@ function PropertyFormModal({
         description: property.description || '',
       })
     } else {
-      setFormData(initialFormData)
+      setFormData({
+        ...initialFormData,
+        domain_class_id: presetDomainClassId || '',
+      })
     }
-  }, [property])
+  }, [property, presetDomainClassId])
 
   if (!isOpen) return null
 
@@ -96,6 +101,7 @@ function PropertyFormModal({
                 value={formData.domain_class_id}
                 onChange={e => setFormData({ ...formData, domain_class_id: e.target.value ? parseInt(e.target.value) : '' })}
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                disabled={!!presetDomainClassId && !property}
               >
                 <option value="">Select a class...</option>
                 {classes.map(cls => (
@@ -104,6 +110,11 @@ function PropertyFormModal({
                   </option>
                 ))}
               </select>
+              {presetDomainClassId && !property && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Domain class is preset for this section
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Range Kind *</label>
@@ -200,6 +211,8 @@ export default function OntologyPropertiesPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingProperty, setEditingProperty] = useState<OntologyProperty | undefined>()
   const [deleteConfirm, setDeleteConfirm] = useState<OntologyProperty | null>(null)
+  const [expandedClasses, setExpandedClasses] = useState<Set<string>>(new Set())
+  const [presetDomainClassId, setPresetDomainClassId] = useState<number | undefined>()
 
   const { data: properties, isLoading, error } = useQuery({
     queryKey: ['ontology-properties'],
@@ -210,6 +223,46 @@ export default function OntologyPropertiesPage() {
     queryKey: ['ontology-classes'],
     queryFn: () => ontologyApi.listClasses().then(r => r.data),
   })
+
+  // Group properties by domain class
+  const groupedProperties = useMemo(() => {
+    if (!properties) return {}
+
+    const grouped: Record<string, OntologyProperty[]> = {}
+    properties.forEach(prop => {
+      const className = prop.domain_class_name || 'Unknown'
+      if (!grouped[className]) {
+        grouped[className] = []
+      }
+      grouped[className].push(prop)
+    })
+
+    // Sort properties within each group
+    Object.keys(grouped).forEach(className => {
+      grouped[className].sort((a, b) => a.prop_name.localeCompare(b.prop_name))
+    })
+
+    return grouped
+  }, [properties])
+
+  // Expand all classes by default on first load
+  useEffect(() => {
+    if (properties && expandedClasses.size === 0) {
+      setExpandedClasses(new Set(Object.keys(groupedProperties)))
+    }
+  }, [properties, groupedProperties, expandedClasses.size])
+
+  const toggleClass = (className: string) => {
+    setExpandedClasses(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(className)) {
+        newSet.delete(className)
+      } else {
+        newSet.add(className)
+      }
+      return newSet
+    })
+  }
 
   const createMutation = useMutation({
     mutationFn: (data: OntologyPropertyCreate) => ontologyApi.createProperty(data),
@@ -270,102 +323,152 @@ export default function OntologyPropertiesPage() {
 
   return (
     <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Ontology Properties</h1>
-          <p className="text-gray-600">Define relationships and attributes for entity classes</p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingProperty(undefined)
-            setShowModal(true)
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <Plus className="h-4 w-4" />
-          Add Property
-        </button>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Ontology Properties</h1>
+        <p className="text-gray-600">Define relationships and attributes for entity classes</p>
       </div>
 
       {isLoading && <div className="text-center py-8 text-gray-500">Loading...</div>}
       {error && <div className="bg-red-50 text-red-700 p-4 rounded-lg">Error loading properties</div>}
 
-      {properties && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Property</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Domain</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Range</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Flags</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Description</th>
-                <th className="px-4 py-3 text-left text-sm font-medium text-gray-500">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {properties.map(prop => (
-                <tr key={prop.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <code className="text-sm font-medium text-blue-600">{prop.prop_name}</code>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 text-sm">
-                      <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                        {prop.domain_class_name}
-                      </span>
-                      <ArrowRight className="h-4 w-4 text-gray-400" />
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    {prop.range_class_name ? (
-                      <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-sm">
-                        {prop.range_class_name}
-                      </span>
-                    ) : (
-                      <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-sm">
-                        {prop.range_kind}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
-                      {prop.is_required && (
-                        <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">required</span>
-                      )}
-                      {prop.is_multi_valued && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">multi</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
-                    {prop.description || '-'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => {
-                          setEditingProperty(prop)
-                          setShowModal(true)
-                        }}
-                        className="p-1 text-gray-400 hover:text-blue-600"
-                        title="Edit property"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteConfirm(prop)}
-                        className="p-1 text-gray-400 hover:text-red-600"
-                        title="Delete property"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {properties && properties.length === 0 && (
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+          No properties defined yet. Click "Add Property" to create one.
+        </div>
+      )}
+
+      {properties && properties.length > 0 && (
+        <div className="space-y-4">
+          {Object.keys(groupedProperties).sort().map(className => {
+            const classProperties = groupedProperties[className]
+            const isExpanded = expandedClasses.has(className)
+            const classInfo = classes.find(c => c.class_name === className)
+
+            return (
+              <div key={className} className="bg-white rounded-lg shadow overflow-hidden">
+                {/* Class Header */}
+                <div className="px-4 py-3 bg-gradient-to-r from-green-50 to-white border-b">
+                  <div className="flex items-start justify-between gap-4">
+                    <button
+                      onClick={() => toggleClass(className)}
+                      className="flex items-start gap-3 hover:opacity-70 transition-opacity flex-1"
+                    >
+                      <div className="pt-1">
+                        {isExpanded ? (
+                          <ChevronDown className="h-5 w-5 text-gray-500" />
+                        ) : (
+                          <ChevronRight className="h-5 w-5 text-gray-500" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-lg font-semibold text-gray-900">{className}</span>
+                          <span className="text-xs text-gray-500">Prefix:</span>
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded font-mono">
+                            {classInfo?.prefix || '?'}:
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            · {classProperties.length} {classProperties.length === 1 ? 'property' : 'properties'}
+                          </span>
+                        </div>
+                        {classInfo?.description && (
+                          <p className="text-sm text-gray-600 mt-0.5">
+                            {classInfo.description}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingProperty(undefined)
+                        setPresetDomainClassId(classInfo?.id)
+                        setShowModal(true)
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex-shrink-0"
+                      title={`Add property to ${className}`}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Property
+                    </button>
+                  </div>
+                </div>
+
+                {/* Properties Table */}
+                {isExpanded && (
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Property</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Range</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Flags</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {classProperties.map(prop => (
+                        <tr key={prop.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <code className="text-sm font-medium text-blue-600">{prop.prop_name}</code>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1">
+                              {prop.range_class_name ? (
+                                <>
+                                  <ArrowRight className="h-4 w-4 text-gray-400" />
+                                  <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-sm">
+                                    {prop.range_class_name}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-sm">
+                                  {prop.range_kind}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1">
+                              {prop.is_required && (
+                                <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">required</span>
+                              )}
+                              {prop.is_multi_valued && (
+                                <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">multi</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                            {prop.description || '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => {
+                                  setEditingProperty(prop)
+                                  setShowModal(true)
+                                }}
+                                className="p-1 text-gray-400 hover:text-blue-600"
+                                title="Edit property"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirm(prop)}
+                                className="p-1 text-gray-400 hover:text-red-600"
+                                title="Delete property"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -374,11 +477,13 @@ export default function OntologyPropertiesPage() {
         onClose={() => {
           setShowModal(false)
           setEditingProperty(undefined)
+          setPresetDomainClassId(undefined)
         }}
         property={editingProperty}
         onSave={handleSave}
         isLoading={createMutation.isPending || updateMutation.isPending}
         classes={classes}
+        presetDomainClassId={presetDomainClassId}
       />
 
       {deleteConfirm && (
