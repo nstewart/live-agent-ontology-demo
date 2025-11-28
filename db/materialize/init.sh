@@ -546,7 +546,7 @@ FROM store_inventory_mv inv
 LEFT JOIN pricing_factors pf ON pf.product_id = inv.product_id
 WHERE inv.availability_status != 'OUT_OF_STOCK';"
 
-# Orders with aggregated line items
+# Orders with aggregated line items and search fields (customer, store, delivery info)
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW IF NOT EXISTS orders_with_lines_mv IN CLUSTER compute AS
 SELECT
@@ -558,6 +558,19 @@ SELECT
     o.delivery_window_start,
     o.delivery_window_end,
     o.order_total_amount,
+    -- Customer fields for search
+    c.customer_name,
+    c.customer_email,
+    c.customer_address,
+    -- Store fields for search
+    s.store_name,
+    s.store_zone,
+    s.store_address,
+    -- Delivery task fields for search
+    dt.assigned_courier_id,
+    dt.task_status AS delivery_task_status,
+    dt.eta AS delivery_eta,
+    -- Line items with dynamic pricing
     COALESCE(
         jsonb_agg(
             jsonb_build_object(
@@ -595,9 +608,15 @@ SELECT
     SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0)::DECIMAL / 1000.0) AS total_weight_kg,
     GREATEST(
         o.effective_updated_at,
-        MAX(ol.effective_updated_at)
+        MAX(ol.effective_updated_at),
+        c.effective_updated_at,
+        s.effective_updated_at,
+        dt.effective_updated_at
     ) AS effective_updated_at
 FROM orders_flat_mv o
+LEFT JOIN customers_flat c ON c.customer_id = o.customer_id
+LEFT JOIN stores_flat s ON s.store_id = o.store_id
+LEFT JOIN delivery_tasks_flat dt ON dt.order_id = o.order_id
 LEFT JOIN order_lines_flat_mv ol ON ol.order_id = o.order_id
 LEFT JOIN inventory_items_with_dynamic_pricing inv
     ON inv.product_id = ol.product_id
@@ -611,7 +630,19 @@ GROUP BY
     o.delivery_window_start,
     o.delivery_window_end,
     o.order_total_amount,
-    o.effective_updated_at;"
+    o.effective_updated_at,
+    c.customer_name,
+    c.customer_email,
+    c.customer_address,
+    c.effective_updated_at,
+    s.store_name,
+    s.store_zone,
+    s.store_address,
+    s.effective_updated_at,
+    dt.assigned_courier_id,
+    dt.task_status,
+    dt.eta,
+    dt.effective_updated_at;"
 
 echo "Creating dynamic pricing materialized view and indexes..."
 
