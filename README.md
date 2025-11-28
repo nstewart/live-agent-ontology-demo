@@ -546,11 +546,99 @@ docker-compose restart search-sync
 docker-compose logs -f search-sync
 ```
 
+You should see:
+```
+INFO - Detected 22 data columns for orders_with_promotions_mv: ['order_id', 'order_number', ...]
+INFO - ✅ Initial hydration complete: 501 documents loaded
+```
+
+#### Step 5: Update Agent Tools to Expose Promotion Fields
+
+Even though promotion data is now in OpenSearch, agents won't be able to see it until you update their search tools to expose the new fields.
+
+**5a. Add Promotion Fields to Search Results**
+
+Modify `agents/src/tools/tool_search_orders.py` to include promotion fields in the returned data:
+
+```python
+# Update the docstring (line ~25)
+    """
+    Search for FreshMart orders using natural language.
+
+    Use this tool to find orders by:
+    - Customer name (e.g., "Alex Thompson")
+    - Customer address (partial match)
+    - Order number (e.g., "FM-1001")
+    - Store name or zone
+    - Promotion code (e.g., "SUMMER25")  # ADD THIS
+
+    Returns:
+        List of matching orders with full details including:
+        - Customer and store information
+        - Order status and delivery windows
+        - Promotion information (code, discount, discounted total)  # ADD THIS
+        - Line items with product names, quantities, and prices
+    """
+```
+
+**5b. Add Promo Code to Search Fields**
+
+Add `promo_code` to the searchable fields (line ~58):
+
+```python
+                "multi_match": {
+                    "query": query,
+                    "fields": [
+                        "order_number^3",
+                        "customer_name^2",
+                        "promo_code^2",  # ADD THIS - boost promo code searches
+                        "customer_address",
+                        "store_name",
+                        "store_zone",
+                    ],
+                    "type": "best_fields",
+                    "fuzziness": "AUTO",
+                }
+```
+
+**5c. Return Promotion Fields in Results**
+
+Add the promotion fields to the returned data (after line ~107):
+
+```python
+            return [
+                {
+                    "order_id": hit["_source"]["order_id"],
+                    "order_number": hit["_source"].get("order_number"),
+                    "order_status": hit["_source"].get("order_status"),
+                    # ... existing fields ...
+                    "order_total_amount": hit["_source"].get("order_total_amount"),
+
+                    # ADD THESE PROMOTION FIELDS:
+                    "promo_code": hit["_source"].get("promo_code"),
+                    "discount_percent": hit["_source"].get("discount_percent"),
+                    "order_total_amount_with_discounts": hit["_source"].get("order_total_amount_with_discounts"),
+
+                    "line_items": hit["_source"].get("line_items", []),
+                    # ... rest of fields ...
+                }
+                for hit in hits
+            ]
+```
+
+**5d. Restart the Agent Service**
+
+```bash
+docker-compose restart agents
+
+# Test that agents can now see promotion data
+```
+
 **What Happens:**
 1. ✅ Worker hydrates all existing orders with promotion data from `orders_with_promotions_mv`
 2. ✅ New orders with promotions are indexed in real-time (< 2s latency)
-3. ✅ Agents can now search orders by promo code
-4. ✅ Discounted totals are available in search results
+3. ✅ OpenSearch index contains promotion fields (promo_code, discount_percent, discounted total)
+4. ✅ **Agents can now search orders by promo code and see promotion details**
 
 **Example Agent Query:**
 
@@ -585,15 +673,23 @@ Total savings: $45.00
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ 4. SUBSCRIBE: Real-time Streaming                               │
+│ 4. SUBSCRIBE: Real-time Streaming (Step 4)                      │
 │    OrdersSyncWorker subscribes to orders_with_promotions_mv     │
 │    (differential updates, < 2s latency)                         │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
-│ 5. INDEX: OpenSearch                                            │
+│ 5. INDEX: OpenSearch (Step 4)                                   │
 │    Bulk upsert to "orders" index with promotion fields          │
-│    (full-text search on order_number, promo_code, customer)     │
+│    (promo_code, discount_percent, discounted_total)             │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. AGENT TOOLS: Expose to Agents (Step 5)                       │
+│    search_orders tool updated to:                               │
+│    - Search by promo_code field                                 │
+│    - Return promotion fields in results                         │
+│    → Agents can now find and display promotion information      │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
