@@ -344,7 +344,6 @@ SELECT
     o.delivery_window_start,
     o.delivery_window_end,
     o.order_total_amount,
-    o.effective_updated_at,
     COALESCE(
         jsonb_agg(
             jsonb_build_object(
@@ -357,7 +356,21 @@ SELECT
                 'line_amount', ol.line_amount,
                 'line_sequence', ol.line_sequence,
                 'perishable_flag', ol.perishable_flag,
-                'unit_weight_grams', ol.unit_weight_grams
+                'unit_weight_grams', ol.unit_weight_grams,
+                'inventory_id', inv.inventory_id,
+                'base_price', inv.base_price,
+                'live_price', inv.live_price,
+                'price_change', inv.price_change,
+                'zone_adjustment', inv.zone_adjustment,
+                'perishable_adjustment', inv.perishable_adjustment,
+                'local_stock_adjustment', inv.local_stock_adjustment,
+                'popularity_adjustment', inv.popularity_adjustment,
+                'scarcity_adjustment', inv.scarcity_adjustment,
+                'demand_multiplier', inv.demand_multiplier,
+                'demand_premium', inv.demand_premium,
+                'product_sale_count', inv.product_sale_count,
+                'product_total_stock', inv.product_total_stock,
+                'current_stock_level', inv.stock_level
             ) ORDER BY ol.line_sequence
         ) FILTER (WHERE ol.line_id IS NOT NULL),
         '[]'::jsonb
@@ -365,9 +378,16 @@ SELECT
     COUNT(ol.line_id) AS line_item_count,
     SUM(ol.line_amount) AS computed_total,
     BOOL_OR(ol.perishable_flag) AS has_perishable_items,
-    SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0)::DECIMAL / 1000.0) AS total_weight_kg
+    SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0)::DECIMAL / 1000.0) AS total_weight_kg,
+    GREATEST(
+        o.effective_updated_at,
+        MAX(ol.effective_updated_at)
+    ) AS effective_updated_at
 FROM orders_flat_mv o
 LEFT JOIN order_lines_flat_mv ol ON ol.order_id = o.order_id
+LEFT JOIN inventory_items_with_dynamic_pricing inv
+    ON inv.product_id = ol.product_id
+    AND inv.store_id = o.store_id
 GROUP BY
     o.order_id,
     o.order_number,
@@ -625,8 +645,8 @@ psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS p
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_order_id_idx IN CLUSTER serving ON order_lines_flat_mv (order_id);" || true
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_product_id_idx IN CLUSTER serving ON order_lines_flat_mv (product_id);" || true
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS order_lines_order_sequence_idx IN CLUSTER serving ON order_lines_flat_mv (order_id, line_sequence);" || true
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_idx IN CLUSTER serving ON orders_with_lines_mv (order_id);" || true
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_status_idx IN CLUSTER serving ON orders_with_lines_mv (order_status, effective_updated_at DESC);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_idx IN CLUSTER serving ON orders_with_lines_mv (effective_updated_at DESC);" || true
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS orders_with_lines_status_idx IN CLUSTER serving ON orders_with_lines_mv (order_status);" || true
 
 # Dynamic pricing indexes
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS inventory_dynamic_pricing_idx IN CLUSTER serving ON inventory_items_with_dynamic_pricing_mv (inventory_id);" || true

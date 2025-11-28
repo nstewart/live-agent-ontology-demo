@@ -258,7 +258,13 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
               Quantity
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Unit Price
+              Order Price
+            </th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
+              Base Price
+            </th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
+              Live Price
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
               Line Total
@@ -294,6 +300,29 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
               <td className="px-3 py-2 text-right text-gray-900">
                 ${formatAmount(item.unit_price)}
               </td>
+              <td className="px-3 py-2 text-right text-gray-700">
+                {item.base_price != null ? (
+                  <span>${formatAmount(item.base_price)}</span>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </td>
+              <td className="px-3 py-2 text-right">
+                {item.live_price != null ? (
+                  <div className="flex flex-col items-end">
+                    <span className="font-medium text-gray-900">
+                      ${formatAmount(item.live_price)}
+                    </span>
+                    {item.price_change != null && item.price_change !== 0 && (
+                      <span className={`text-xs ${item.price_change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {item.price_change > 0 ? '+' : ''}${formatAmount(item.price_change)}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </td>
               <td className="px-3 py-2 text-right font-medium text-gray-900">
                 ${formatAmount(item.line_amount)}
               </td>
@@ -309,7 +338,7 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
         </tbody>
         <tfoot>
           <tr className="bg-gray-50 font-semibold">
-            <td colSpan={3} className="px-3 py-2 text-right text-gray-700">
+            <td colSpan={5} className="px-3 py-2 text-right text-gray-700">
               Subtotal (
               {lineItems.reduce((sum, item) => sum + item.quantity, 0)} items):
             </td>

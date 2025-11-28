@@ -51,6 +51,21 @@ export type OrderLineItem = {
   line_sequence: number
   perishable_flag: boolean
   unit_weight_grams: number | null
+  // Dynamic pricing fields from inventory
+  inventory_id?: string | null
+  base_price?: number | null
+  live_price?: number | null
+  price_change?: number | null
+  zone_adjustment?: number | null
+  perishable_adjustment?: number | null
+  local_stock_adjustment?: number | null
+  popularity_adjustment?: number | null
+  scarcity_adjustment?: number | null
+  demand_multiplier?: number | null
+  demand_premium?: number | null
+  product_sale_count?: number | null
+  product_total_stock?: number | null
+  current_stock_level?: number | null
 }
 
 // orders_with_lines_mv - orders with embedded line items as JSON
