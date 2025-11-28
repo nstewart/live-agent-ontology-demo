@@ -150,6 +150,33 @@ const products_mv = table('products_mv')
   })
   .primaryKey('product_id')
 
+// inventory_items_with_dynamic_pricing - inventory with live pricing
+const inventory_items_with_dynamic_pricing = table('inventory_items_with_dynamic_pricing')
+  .columns({
+    inventory_id: string(),
+    store_id: string().optional(),
+    store_name: string().optional(),
+    store_zone: string().optional(),
+    product_id: string().optional(),
+    product_name: string().optional(),
+    category: string().optional(),
+    stock_level: number().optional(),
+    perishable: boolean().optional(),
+    base_price: number().optional(),
+    zone_adjustment: number().optional(),
+    perishable_adjustment: number().optional(),
+    local_stock_adjustment: number().optional(),
+    popularity_adjustment: number().optional(),
+    scarcity_adjustment: number().optional(),
+    demand_multiplier: number().optional(),
+    demand_premium: number().optional(),
+    product_sale_count: number().optional(),
+    product_total_stock: number().optional(),
+    live_price: number().optional(),
+    price_change: number().optional(),
+  })
+  .primaryKey('inventory_id')
+
 // Define relationships
 const storeRelationships = relationships(stores_mv, ({ many }) => ({
   inventory: many({
@@ -186,7 +213,7 @@ const inventoryRelationships = relationships(store_inventory_mv, ({ one }) => ({
 }))
 
 export const schema = createSchema({
-  tables: [orders_search_source_mv, orders_with_lines_mv, stores_mv, store_inventory_mv, courier_schedule_mv, customers_mv, products_mv],
+  tables: [orders_search_source_mv, orders_with_lines_mv, stores_mv, store_inventory_mv, courier_schedule_mv, customers_mv, products_mv, inventory_items_with_dynamic_pricing],
   relationships: [storeRelationships, courierRelationships, orderWithLinesRelationships, inventoryRelationships],
 })
 
@@ -242,6 +269,14 @@ export const permissions = definePermissions<unknown, Schema>(schema, () => ({
     },
   },
   products_mv: {
+    row: {
+      select: ANYONE_CAN,
+      insert: NOBODY_CAN,
+      update: { preMutation: NOBODY_CAN },
+      delete: NOBODY_CAN,
+    },
+  },
+  inventory_items_with_dynamic_pricing: {
     row: {
       select: ANYONE_CAN,
       insert: NOBODY_CAN,

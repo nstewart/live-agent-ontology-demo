@@ -7,6 +7,8 @@ export interface CartLineItem {
   product_name: string
   quantity: number
   unit_price: number
+  live_price?: number
+  base_price?: number
   line_amount: number
   perishable_flag: boolean
   available_stock: number

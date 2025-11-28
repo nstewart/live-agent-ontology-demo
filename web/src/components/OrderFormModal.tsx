@@ -183,7 +183,10 @@ export function OrderFormModal({
         updated[existingIndex] = {
           ...existing,
           quantity: newQuantity,
-          line_amount: newQuantity * existing.unit_price,
+          unit_price: product.unit_price || existing.unit_price,
+          live_price: product.live_price || existing.live_price,
+          base_price: product.base_price || existing.base_price,
+          line_amount: newQuantity * (product.unit_price || existing.unit_price),
           available_stock: product.stock_level,
         };
         return updated;
@@ -201,6 +204,8 @@ export function OrderFormModal({
             product_name: product.product_name || "Unknown Product",
             quantity: 1,
             unit_price: product.unit_price || 0,
+            live_price: product.live_price || undefined,
+            base_price: product.base_price || undefined,
             perishable_flag: product.perishable || false,
             available_stock: product.stock_level,
             category: product.category || undefined,
