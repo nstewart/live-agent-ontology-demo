@@ -356,15 +356,14 @@ Make it queryable with low latency:
 CREATE INDEX promotions_idx IN CLUSTER serving ON promotions_mv (promo_id);
 ```
 
-**3d. Enrich Existing Views (Optional)**
+**3d. Enrich Existing Views (Zero-Downtime Pattern)**
 
-If orders reference promotions, enrich the orders view:
+If orders reference promotions, create a new enriched view without disrupting the existing one:
 
 ```sql
--- Drop and recreate with promotion enrichment
-DROP MATERIALIZED VIEW orders_search_source_mv CASCADE;
-
-CREATE MATERIALIZED VIEW orders_search_source_mv IN CLUSTER compute AS
+-- Create v2 of orders view with promotion enrichment (regular view, not materialized)
+-- This allows testing without impacting production
+CREATE VIEW orders_with_promotions AS
 SELECT
     o.order_id,
     o.order_number,
@@ -376,7 +375,14 @@ SELECT
     promo.promo_id,
     promo.promo_code,
     promo.discount_percent,
-    GREATEST(o.effective_updated_at, promo.effective_updated_at) AS effective_updated_at
+    -- Computed: Apply discount if promo exists, otherwise use original total
+    CASE
+        WHEN promo.discount_percent IS NOT NULL THEN
+            o.order_total_amount * (1 - promo.discount_percent / 100.0)
+        ELSE
+            o.order_total_amount
+    END AS order_total_amount_with_discounts,
+    GREATEST(o.effective_updated_at, COALESCE(promo.effective_updated_at, o.effective_updated_at)) AS effective_updated_at
 FROM orders_flat_mv o
 LEFT JOIN customers_flat c ON c.customer_id = o.customer_id
 LEFT JOIN stores_flat s ON s.store_id = o.store_id
@@ -392,9 +398,40 @@ LEFT JOIN (
     WHERE t.predicate = 'promo_applied'
 ) promo ON promo.order_id = o.order_id;
 
--- Recreate index
-CREATE INDEX orders_search_source_idx IN CLUSTER serving ON orders_search_source_mv (order_id);
+-- Test the view first
+SELECT * FROM orders_with_promotions LIMIT 10;
+
+-- Example results showing discount calculation:
+-- order_id  | order_total_amount | promo_code | discount_percent | order_total_amount_with_discounts
+-- ----------|-------------------|------------|------------------|----------------------------------
+-- order:001 | 100.00            | SUMMER25   | 15.0             | 85.00   (100 * (1 - 15/100))
+-- order:002 | 50.00             | NULL       | NULL             | 50.00   (no discount applied)
+-- order:003 | 200.00            | BACKTOSCHOOL | 20.0           | 160.00  (200 * (1 - 20/100))
+
+-- When ready to deploy: Create new materialized view in compute cluster
+CREATE MATERIALIZED VIEW orders_with_promotions_mv IN CLUSTER compute AS
+SELECT * FROM orders_with_promotions;
+
+-- Create index in serving cluster
+CREATE INDEX orders_with_promotions_idx IN CLUSTER serving
+ON orders_with_promotions_mv (order_id);
+
+-- Update applications to query orders_with_promotions_mv instead of orders_search_source_mv
+-- Once confirmed working, optionally drop the old view:
+-- DROP MATERIALIZED VIEW orders_search_source_mv CASCADE;
 ```
+
+**Zero-Downtime Deployment Steps:**
+1. ✅ Create the new regular view `orders_with_promotions` (no materialization)
+2. ✅ Test queries against the view to validate logic
+3. ✅ Materialize the view as `orders_with_promotions_mv` when ready
+4. ✅ Create indexes on the new materialized view
+5. ✅ Update applications to point to the new view
+6. ✅ Verify production traffic works correctly
+7. ✅ Deprecate and drop old view after cutover
+
+**Future Improvement:**
+> **Note**: `ALTER MATERIALIZED VIEW` is on the Materialize roadmap, which will streamline this process by allowing in-place schema changes without creating new views. This will make adding columns like `promo_id` much simpler in the future.
 
 #### Step 4: Add API Endpoints
 
