@@ -1,5 +1,6 @@
 """Order Line service for CRUD operations on line items."""
 
+import logging
 from decimal import Decimal
 from typing import Optional
 
@@ -10,6 +11,8 @@ from src.db.client import get_mz_session_factory
 from src.freshmart.models import OrderLineCreate, OrderLineFlat, OrderLineUpdate
 from src.triples.models import TripleCreate
 from src.triples.service import TripleService
+
+logger = logging.getLogger(__name__)
 
 
 class OrderLineService:
@@ -40,15 +43,25 @@ class OrderLineService:
 
         Args:
             store_id: Store ID to query inventory for
-            product_ids: List of product IDs to fetch prices for
+            product_ids: List of product IDs to fetch prices for (max 100)
 
         Returns:
             Dictionary mapping product_id to live_price
+
+        Raises:
+            ValueError: If product_ids list exceeds 100 items (DoS protection)
         """
         live_prices = {}
 
         if not product_ids:
             return live_prices
+
+        # DoS protection: limit IN clause size to prevent excessive query complexity
+        if len(product_ids) > 100:
+            raise ValueError(
+                f"Cannot fetch prices for {len(product_ids)} products. "
+                f"Maximum allowed is 100 products per request."
+            )
 
         try:
             # Query Materialize for live prices (not PostgreSQL)
@@ -82,7 +95,16 @@ class OrderLineService:
 
         except Exception as e:
             # Log error but don't fail - will use provided unit_price as fallback
-            print(f"Warning: Failed to fetch live prices from Materialize: {e}")
+            logger.warning(
+                "Failed to fetch live prices from Materialize",
+                extra={
+                    "store_id": store_id,
+                    "product_count": len(product_ids),
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
 
         return live_prices
 
