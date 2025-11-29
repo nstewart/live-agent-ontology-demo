@@ -23,8 +23,8 @@ async def create_order(
     IMPORTANT:
     - Orders are ALWAYS created in the CREATED state initially.
     - This tool automatically validates that items are available in the store's inventory
-    - Only items that are in stock will be added to the order
-    - Items not available will be reported but won't prevent order creation
+    - If any item has insufficient stock, the order creation will FAIL with an error
+    - Items not available at the store will be skipped and reported
     - Unit prices are AUTOMATICALLY set to the current live_price from inventory (dynamic pricing)
 
     Use this tool after:
@@ -118,13 +118,6 @@ async def create_order(
                         "requested": requested_qty,
                         "available": available_inventory[product_id]["stock_level"],
                     })
-                    # Add item with available quantity and live price from inventory
-                    valid_items.append({
-                        "product_id": product_id,
-                        "quantity": available_inventory[product_id]["stock_level"],
-                        "unit_price": available_inventory[product_id]["live_price"],
-                        "is_perishable": available_inventory[product_id]["is_perishable"],
-                    })
                 else:
                     # Use live price from inventory, not the price passed by the agent
                     valid_items.append({
@@ -133,6 +126,17 @@ async def create_order(
                         "unit_price": available_inventory[product_id]["live_price"],
                         "is_perishable": available_inventory[product_id]["is_perishable"],
                     })
+
+            # Return error if any items have insufficient stock
+            if insufficient_stock_items:
+                return {
+                    "success": False,
+                    "error": "Insufficient stock for requested items",
+                    "store_id": store_id,
+                    "insufficient_stock": insufficient_stock_items,
+                    "skipped_items": skipped_items,
+                    "available_products": list(available_inventory.keys()),
+                }
 
             # If no valid items, return error
             if not valid_items:
@@ -289,17 +293,10 @@ async def create_order(
                 "delivery_window_end": window_end.isoformat() + "Z",
             }
 
-            # Add inventory validation details if any items were skipped or adjusted
+            # Add inventory validation details if any items were skipped
             if skipped_items:
                 result["skipped_items"] = skipped_items
                 result["message"] = f"Order created with {len(items)} items. {len(skipped_items)} items were not available at this store."
-
-            if insufficient_stock_items:
-                result["adjusted_quantities"] = insufficient_stock_items
-                if "message" in result:
-                    result["message"] += f" {len(insufficient_stock_items)} items had quantities adjusted to match available stock."
-                else:
-                    result["message"] = f"Order created with {len(items)} items. {len(insufficient_stock_items)} items had quantities adjusted to match available stock."
 
             return result
 

@@ -501,7 +501,7 @@ SELECT
 
   -- Computed dynamic price with all factors
   ROUND(
-    inv.unit_price *
+    COALESCE(inv.unit_price, 0) *
     CASE WHEN inv.store_zone = 'MAN' THEN 1.15
          WHEN inv.store_zone = 'BK' THEN 1.05
          WHEN inv.store_zone = 'QNS' THEN 1.00
@@ -521,7 +521,7 @@ SELECT
 
   -- Price difference for easy comparison
   ROUND(
-    (inv.unit_price *
+    (COALESCE(inv.unit_price, 0) *
       CASE WHEN inv.store_zone = 'MAN' THEN 1.15
            WHEN inv.store_zone = 'BK' THEN 1.05
            WHEN inv.store_zone = 'QNS' THEN 1.00
@@ -536,7 +536,7 @@ SELECT
       COALESCE(pf.scarcity_adjustment, 1.0) *
       COALESCE(pf.demand_multiplier, 1.0) *
       COALESCE(pf.demand_premium, 1.0)
-    ) - inv.unit_price,
+    ) - COALESCE(inv.unit_price, 0),
     2
   ) AS price_change,
 
@@ -544,7 +544,8 @@ SELECT
 
 FROM store_inventory_mv inv
 LEFT JOIN pricing_factors pf ON pf.product_id = inv.product_id
-WHERE inv.availability_status != 'OUT_OF_STOCK';"
+WHERE inv.availability_status != 'OUT_OF_STOCK'
+  AND inv.unit_price IS NOT NULL;"
 
 # Orders with aggregated line items and search fields (customer, store, delivery info)
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
