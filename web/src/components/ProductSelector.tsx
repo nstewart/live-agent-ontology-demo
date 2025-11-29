@@ -8,6 +8,8 @@ export interface ProductWithStock {
   product_name: string | null
   category: string | null
   unit_price: number | null
+  live_price: number | null
+  base_price: number | null
   perishable: boolean | null
   stock_level: number
   inventory_id: string
@@ -24,8 +26,8 @@ export function ProductSelector({ storeId, onProductSelect, disabled }: ProductS
 
   const z = useZero<Schema>()
 
-  // Query inventory for the selected store with related product data
-  let inventoryQuery = z.query.store_inventory_mv.related('product')
+  // Query inventory with dynamic pricing for the selected store
+  let inventoryQuery = z.query.inventory_items_with_dynamic_pricing
   if (storeId) {
     inventoryQuery = inventoryQuery.where('store_id', '=', storeId)
   }
@@ -36,13 +38,15 @@ export function ProductSelector({ storeId, onProductSelect, disabled }: ProductS
     if (!storeId) return []
 
     return inventoryData
-      .filter(inv => inv.stock_level && inv.stock_level > 0 && inv.product)
+      .filter(inv => inv.stock_level && inv.stock_level > 0)
       .map(inv => ({
         product_id: inv.product_id || '',
-        product_name: inv.product?.product_name ?? null,
-        category: inv.product?.category ?? null,
-        unit_price: inv.product?.unit_price ?? null,
-        perishable: inv.product?.perishable ?? null,
+        product_name: inv.product_name ?? null,
+        category: inv.category ?? null,
+        unit_price: inv.live_price ?? inv.base_price ?? null,
+        live_price: inv.live_price ?? null,
+        base_price: inv.base_price ?? null,
+        perishable: inv.perishable ?? null,
         stock_level: inv.stock_level || 0,
         inventory_id: inv.inventory_id,
       }))
@@ -141,7 +145,7 @@ export function ProductSelector({ storeId, onProductSelect, disabled }: ProductS
                         <span>{product.category || 'Uncategorized'}</span>
                         <span className="text-gray-300">|</span>
                         <span className="font-medium text-green-600">
-                          ${typeof product.unit_price === 'number' ? product.unit_price.toFixed(2) : '0.00'}
+                          ${typeof product.live_price === 'number' ? product.live_price.toFixed(2) : typeof product.base_price === 'number' ? product.base_price.toFixed(2) : '0.00'}
                         </span>
                       </div>
                     </div>

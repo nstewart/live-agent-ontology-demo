@@ -1,4 +1,4 @@
-"""Orders sync worker - syncs orders_search_source_mv to OpenSearch using SUBSCRIBE streaming.
+"""Orders sync worker - syncs orders_with_lines_mv to OpenSearch using SUBSCRIBE streaming.
 
 This worker extends BaseSubscribeWorker to sync order data from Materialize
 to OpenSearch with real-time streaming and UPDATE consolidation.
@@ -11,7 +11,7 @@ Key Features:
     - Real-time streaming with < 2 second latency
     - UPDATE consolidation (DELETE + INSERT at same timestamp = UPDATE)
     - Enriched order data with customer, store, and delivery details
-    - Line items as nested documents for efficient querying
+    - Line items with dynamic pricing as nested documents for efficient querying
 
 Example:
     Basic usage::
@@ -91,6 +91,21 @@ ORDERS_INDEX_MAPPING = {
                     "line_sequence": {"type": "integer"},
                     "perishable_flag": {"type": "boolean"},
                     "unit_weight_grams": {"type": "integer"},
+                    # Dynamic pricing fields from inventory
+                    "inventory_id": {"type": "keyword"},
+                    "base_price": {"type": "float"},
+                    "live_price": {"type": "float"},
+                    "price_change": {"type": "float"},
+                    "zone_adjustment": {"type": "float"},
+                    "perishable_adjustment": {"type": "float"},
+                    "local_stock_adjustment": {"type": "float"},
+                    "popularity_adjustment": {"type": "float"},
+                    "scarcity_adjustment": {"type": "float"},
+                    "demand_multiplier": {"type": "float"},
+                    "demand_premium": {"type": "float"},
+                    "product_sale_count": {"type": "integer"},
+                    "product_total_stock": {"type": "integer"},
+                    "current_stock_level": {"type": "integer"},
                 },
             },
             "line_item_count": {"type": "integer"},
@@ -112,17 +127,17 @@ class OrdersSyncWorker(BaseSubscribeWorker):
     and UPDATE consolidation for efficient handling of order updates.
 
     Configuration:
-        - View: orders_search_source_mv
+        - View: orders_with_lines_mv
         - Index: orders
         - Consolidation: Enabled (handles UPDATE = DELETE + INSERT)
 
     The worker syncs enriched order data including customer info, store
-    details, delivery tasks, and line items as nested documents.
+    details, delivery tasks, and line items with dynamic pricing as nested documents.
     """
 
     def get_view_name(self) -> str:
         """Return Materialize view name."""
-        return "orders_search_source_mv"
+        return "orders_with_lines_mv"
 
     def get_index_name(self) -> str:
         """Return OpenSearch index name."""

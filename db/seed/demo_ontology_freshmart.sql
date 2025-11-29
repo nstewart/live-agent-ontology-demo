@@ -117,6 +117,67 @@ SELECT 'replenishment_eta', id, 'timestamp', NULL, FALSE, FALSE, 'Expected resto
 FROM ontology_classes WHERE class_name = 'InventoryItem'
 ON CONFLICT (prop_name) DO NOTHING;
 
+-- InventoryItem dynamic pricing properties
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'base_price', id, 'float', NULL, FALSE, FALSE, 'Base price before dynamic adjustments'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'live_price', id, 'float', NULL, FALSE, FALSE, 'Current dynamically-calculated price with all adjustments applied'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'price_change', id, 'float', NULL, FALSE, FALSE, 'Difference between live price and base price'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'zone_adjustment', id, 'float', NULL, FALSE, FALSE, 'Zone-based pricing multiplier (e.g., Manhattan premium)'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'perishable_adjustment', id, 'float', NULL, FALSE, FALSE, 'Perishability discount multiplier to move inventory faster'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'local_stock_adjustment', id, 'float', NULL, FALSE, FALSE, 'Local stock scarcity multiplier for this specific store'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'popularity_adjustment', id, 'float', NULL, FALSE, FALSE, 'Product popularity multiplier based on sales rank within category'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'scarcity_adjustment', id, 'float', NULL, FALSE, FALSE, 'Cross-store scarcity multiplier based on total available stock'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'demand_multiplier', id, 'float', NULL, FALSE, FALSE, 'Demand-based pricing multiplier for high-demand products'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'demand_premium', id, 'float', NULL, FALSE, FALSE, 'Additional demand premium for exceptionally high-demand products'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'product_sale_count', id, 'int', NULL, FALSE, FALSE, 'Historical sales count for this product across all stores'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'product_total_stock', id, 'int', NULL, FALSE, FALSE, 'Total stock level for this product across all stores'
+FROM ontology_classes WHERE class_name = 'InventoryItem'
+ON CONFLICT (prop_name) DO NOTHING;
+
 -- Order properties
 INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
 SELECT 'order_number', id, 'string', NULL, FALSE, TRUE, 'Human-readable order number (FM-XXXX)'
@@ -191,6 +252,12 @@ ON CONFLICT (prop_name) DO NOTHING;
 INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
 SELECT 'perishable_flag', id, 'bool', NULL, FALSE, TRUE, 'Denormalized perishable flag from product for performance'
 FROM ontology_classes WHERE class_name = 'OrderLine'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'line_inventory_item', ol.id, 'entity_ref', inv.id, FALSE, FALSE, 'Inventory item used to fulfill this order line'
+FROM ontology_classes ol, ontology_classes inv
+WHERE ol.class_name = 'OrderLine' AND inv.class_name = 'InventoryItem'
 ON CONFLICT (prop_name) DO NOTHING;
 
 -- Courier properties
