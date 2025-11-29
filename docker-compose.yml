@@ -94,6 +94,8 @@ services:
       depends_on:
         mz:
           condition: service_healthy
+        materialize-init:
+          condition: service_completed_successfully
       environment:
           MATERIALIZE_HOST_ADDRESS: ${MZ_HOST:-mz}:6876
           MATERIALIZE_AUTH_OPTIONS_USER: ${MZ_USER:-materialize}
