@@ -29,6 +29,29 @@ This system implements **CQRS (Command Query Responsibility Segregation)** to se
 - **Real-time consistency**: CDC ensures views reflect writes within milliseconds
 - **Scalability**: Independent scaling of write (PostgreSQL) and read (Materialize) workloads
 
+## Dynamic Pricing Feature
+
+FreshMart implements **real-time dynamic pricing** that adjusts product prices based on multiple factors:
+
+**Pricing Factors**:
+- **Zone-based pricing**: Manhattan (+15%), Brooklyn (+5%), Queens (baseline), Bronx (-2%), Staten Island (-5%)
+- **Perishable discounts**: 5% discount on perishable items to move inventory faster
+- **Local stock adjustments**: Premium for low stock at specific stores (≤5 units: +10%, ≤15 units: +3%)
+- **Popularity rankings**: Top products get 20% premium, mid-tier get 10%, less popular get 10% discount
+- **Scarcity adjustments**: Products with low total stock across all stores get premiums (top 3: +15%, 4-10: +8%)
+- **Demand multipliers**: Based on recent sales velocity and pricing trends
+
+**Implementation**:
+- `inventory_items_with_dynamic_pricing` view computes live prices in real-time
+- UI displays live prices in product selection and shopping cart
+- Orders are created with live prices automatically
+- Zero WebSocket replication ensures UI shows current prices instantly
+
+**Data Safety**:
+- NULL price handling with COALESCE() prevents calculation failures
+- Filters out items with NULL base prices from pricing view
+- Agent tool `create_order` uses live prices from inventory automatically
+
 ## Adding Ontological Elements: A Complete Guide
 
 This guide explains how to extend the FreshMart ontology with new entity types and create corresponding Materialize views to support different use cases.
@@ -1136,6 +1159,25 @@ Query pre-computed, denormalized views (powered by Materialize):
 - `GET /stats` - Query execution statistics (PostgreSQL & Materialize)
   - Shows query counts, execution times, slow queries by operation type
 
+### Security & Performance Features
+
+**DoS Protection:**
+- Order line creation limited to 100 products per request
+- Prevents excessive IN clause sizes in SQL queries
+- Returns clear error messages when limits exceeded
+
+**Data Validation:**
+- NULL price handling in dynamic pricing calculations
+- COALESCE() used throughout to prevent NULL propagation
+- Items with NULL prices filtered from inventory views
+- Insufficient stock errors (no silent quantity modifications)
+
+**Observability:**
+- Structured logging with contextual information
+- Error logs include store_id, product_count, error_type
+- Full exception tracebacks for debugging
+- Query execution time tracking
+
 ### Data Flow & Architecture
 
 **Writes:** All modifications go through the triple store:
@@ -1412,6 +1454,8 @@ The LangGraph-powered ops assistant provides AI-powered operations support with 
 - **Create new customers** with name, email, address, and phone
 - **Create complete orders** with customer selection, store selection, and multiple line items
 - Automatically validates product availability and inventory at selected store
+- **Stock validation**: Returns error if insufficient stock (no silent quantity changes)
+- **Live pricing**: Uses current dynamic prices from inventory automatically
 
 **Knowledge Graph Operations:**
 - **Query the ontology** to understand entity types and properties
@@ -1726,6 +1770,7 @@ All FreshMart endpoints query precomputed, indexed materialized views - no on-th
 | `/freshmart/stores` | `stores_mv` | `stores_idx` |
 | `/freshmart/customers` | `customers_mv` | `customers_idx` |
 | `/freshmart/products` | `products_mv` | `products_idx` |
+| UI Order Creation | `inventory_items_with_dynamic_pricing` | `inventory_items_with_dynamic_pricing_idx` |
 
 The materialized views flatten the triple store into denormalized structures in the **compute cluster**, then indexes in the **serving cluster** provide sub-millisecond lookups.
 
@@ -2077,8 +2122,11 @@ All operational dashboards (Orders, Couriers, Stores/Inventory) feature **live d
 
 ### Orders Dashboard
 - **Real-time order status updates** - See orders move through workflow stages instantly
+- **Live dynamic pricing** - Product prices update in real-time based on zone, stock, and demand
 - View all orders with status badges and filtering
 - Create new orders with dropdown selectors for customers and stores
+- Product selection shows live prices (not base prices)
+- Shopping cart calculates totals using live prices
 - Edit existing orders with pre-populated form fields
 - Delete orders with confirmation dialog
 
