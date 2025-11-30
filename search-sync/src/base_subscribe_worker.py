@@ -440,8 +440,10 @@ class BaseSubscribeWorker(ABC):
 
         self.events_received += len(events)
 
+        # Extract timestamp from first event for batch identification
+        timestamp = events[0].timestamp if events else "unknown"
         logger.info(
-            f"Processing {len(events)} events from {self.get_view_name()} "
+            f"📦 BATCH @ mz_ts={timestamp}: Processing {len(events)} events from {self.get_view_name()} "
             f"(total received: {self.events_received})"
         )
 
@@ -477,17 +479,30 @@ class BaseSubscribeWorker(ABC):
         Args:
             events: List of SubscribeEvent to process
         """
+        insert_ids = []
+        delete_ids = []
+
         for event in events:
             if event.is_insert():
                 # Insert - transform and queue for upsert
                 doc = self.transform_event_to_doc(event.data)
                 if doc:
                     self.pending_upserts.append(doc)
+                    doc_id = self.get_doc_id(event.data)
+                    if doc_id:
+                        insert_ids.append(doc_id)
             elif event.is_delete():
                 # Delete - extract ID and queue for deletion
                 doc_id = self.get_doc_id(event.data)
                 if doc_id:
                     self.pending_deletes.append(doc_id)
+                    delete_ids.append(doc_id)
+
+        # Log operations grouped by type for easy filtering
+        if insert_ids:
+            logger.info(f"  ➕ Inserts: {insert_ids}")
+        if delete_ids:
+            logger.info(f"  ❌ Deletes: {delete_ids}")
 
     async def _handle_events_with_consolidation(self, events: list[SubscribeEvent]):
         """Complex event processing: consolidate DELETE + INSERT = UPDATE.
@@ -519,25 +534,37 @@ class BaseSubscribeWorker(ABC):
                 latest_data = event.data if event.is_insert() else prev_data
                 consolidated[doc_id] = (net_diff, latest_data)
 
-        # Process consolidated events
+        # Process consolidated events and track document IDs by operation type
+        upsert_ids = []
+        delete_ids = []
+        update_ids = []
+
         for doc_id, (net_diff, data) in consolidated.items():
             if net_diff > 0:
                 # Net insert
                 doc = self.transform_event_to_doc(data)
                 if doc:
                     self.pending_upserts.append(doc)
-                    logger.debug(f"Queued insert: {doc_id}")
+                    upsert_ids.append(doc_id)
             elif net_diff < 0:
                 # Net delete
                 self.pending_deletes.append(doc_id)
-                logger.debug(f"Queued delete: {doc_id}")
+                delete_ids.append(doc_id)
             else:
                 # net_diff == 0: UPDATE (delete + insert cancelled out)
                 # Treat as upsert with latest data
                 doc = self.transform_event_to_doc(data)
                 if doc:
                     self.pending_upserts.append(doc)
-                    logger.debug(f"Queued update: {doc_id}")
+                    update_ids.append(doc_id)
+
+        # Log operations grouped by type for easy filtering
+        if upsert_ids:
+            logger.info(f"  ➕ Inserts: {upsert_ids}")
+        if update_ids:
+            logger.info(f"  🔄 Updates: {update_ids}")
+        if delete_ids:
+            logger.info(f"  ❌ Deletes: {delete_ids}")
 
     async def _flush_batch(self):
         """Flush pending upserts and deletes to OpenSearch with retry logic.
@@ -553,7 +580,7 @@ class BaseSubscribeWorker(ABC):
         delete_count = len(self.pending_deletes)
 
         logger.info(
-            f"Flushing batch to OpenSearch: "
+            f"💾 FLUSH → {index_name}: "
             f"{upsert_count} upserts, {delete_count} deletes"
         )
 
