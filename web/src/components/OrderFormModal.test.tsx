@@ -247,6 +247,106 @@ describe('OrderFormModal - Unsaved Changes Tracking', () => {
       // The store change triggers a confirmation dialog
       // This test verifies the hasUnsavedChanges is reset after confirmation
     })
+
+    it('should set hasUnsavedChanges when order status changes', async () => {
+      render(
+        <OrderFormModal
+          isOpen={true}
+          onClose={mockOnClose}
+          order={mockOrder}
+          onSave={mockOnSave}
+          isLoading={false}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('Existing Product')).toBeInTheDocument()
+      })
+
+      // Change order status
+      const statusSelect = screen.getAllByRole('combobox').find(
+        (select) => select.getAttribute('value') === 'CREATED'
+      )
+      expect(statusSelect).toBeDefined()
+      fireEvent.change(statusSelect!, { target: { value: 'PICKING' } })
+
+      // Warning banner should appear
+      await waitFor(() => {
+        expect(screen.getByText(/You have unsaved changes/)).toBeInTheDocument()
+      })
+    })
+
+    it('should set hasUnsavedChanges when customer changes', async () => {
+      render(
+        <OrderFormModal
+          isOpen={true}
+          onClose={mockOnClose}
+          order={mockOrder}
+          onSave={mockOnSave}
+          isLoading={false}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('Existing Product')).toBeInTheDocument()
+      })
+
+      // Change customer
+      const customerSelect = screen.getAllByRole('combobox').find(
+        (select) => select.getAttribute('value') === 'customer:TEST-01'
+      )
+      expect(customerSelect).toBeDefined()
+      fireEvent.change(customerSelect!, { target: { value: 'customer:TEST-02' } })
+
+      // Warning banner should appear
+      await waitFor(() => {
+        expect(screen.getByText(/You have unsaved changes/)).toBeInTheDocument()
+      })
+    })
+
+    it('should set hasUnsavedChanges when delivery window changes', async () => {
+      render(
+        <OrderFormModal
+          isOpen={true}
+          onClose={mockOnClose}
+          order={mockOrder}
+          onSave={mockOnSave}
+          isLoading={false}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('Existing Product')).toBeInTheDocument()
+      })
+
+      // Change delivery window start
+      const deliveryStartInput = screen.getAllByDisplayValue('2024-01-15T14:00')[0]
+      expect(deliveryStartInput).toBeDefined()
+      fireEvent.change(deliveryStartInput, { target: { value: '2024-01-15T15:00' } })
+
+      // Warning banner should appear
+      await waitFor(() => {
+        expect(screen.getByText(/You have unsaved changes/)).toBeInTheDocument()
+      })
+    })
+
+    it('should not set hasUnsavedChanges for form field changes in new orders', async () => {
+      render(
+        <OrderFormModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onSave={mockOnSave}
+          isLoading={false}
+        />
+      )
+
+      // Fill in order number for new order
+      const orderNumberInput = screen.getByPlaceholderText('FM-1001')
+      fireEvent.change(orderNumberInput, { target: { value: 'FM-2001' } })
+
+      // Warning banner should not appear (new orders don't show the banner)
+      expect(screen.queryByText(/You have unsaved changes/)).not.toBeInTheDocument()
+    })
   })
 
   describe('Warning banner display', () => {

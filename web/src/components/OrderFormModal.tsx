@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useZero, useQuery } from "@rocicorp/zero/react";
 import { Schema, OrderLineItem } from "../schema";
 import { X, AlertTriangle } from "lucide-react";
@@ -24,16 +24,6 @@ export interface OrderFormData {
   delivery_window_end: string;
 }
 
-const initialFormData: OrderFormData = {
-  order_number: "",
-  customer_id: "",
-  store_id: "",
-  order_status: "CREATED",
-  order_total_amount: "",
-  delivery_window_start: "",
-  delivery_window_end: "",
-};
-
 // Extended order type with line items from Zero
 export interface OrderWithLines extends OrderFlat {
   line_items?: OrderLineItem[] | null;
@@ -56,6 +46,17 @@ export function OrderFormModal({
   onSave,
   isLoading,
 }: OrderFormModalProps) {
+  // Memoize initialFormData to fix useEffect dependency warning
+  const initialFormData: OrderFormData = useMemo(() => ({
+    order_number: "",
+    customer_id: "",
+    store_id: "",
+    order_status: "CREATED",
+    order_total_amount: "",
+    delivery_window_start: "",
+    delivery_window_end: "",
+  }), []);
+
   const [formData, setFormData] = useState<OrderFormData>(initialFormData);
   const [lineItems, setLineItems] = useState<CartLineItem[]>([]);
   const [showStoreChangeConfirm, setShowStoreChangeConfirm] = useState(false);
@@ -306,9 +307,10 @@ export function OrderFormModal({
                   required
                   disabled={!!order}
                   value={formData.order_number}
-                  onChange={(e) =>
-                    setFormData({ ...formData, order_number: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, order_number: e.target.value });
+                    if (order) setHasUnsavedChanges(true);
+                  }}
                   placeholder="FM-1001"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
                 />
@@ -320,9 +322,10 @@ export function OrderFormModal({
                 <select
                   required
                   value={formData.order_status}
-                  onChange={(e) =>
-                    setFormData({ ...formData, order_status: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, order_status: e.target.value });
+                    if (order) setHasUnsavedChanges(true);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
                 >
                   {statusOrder.map((status) => (
@@ -341,9 +344,10 @@ export function OrderFormModal({
                 <select
                   required
                   value={formData.customer_id}
-                  onChange={(e) =>
-                    setFormData({ ...formData, customer_id: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, customer_id: e.target.value });
+                    if (order) setHasUnsavedChanges(true);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
                 >
                   <option value="">Select a customer...</option>
@@ -420,12 +424,13 @@ export function OrderFormModal({
                 <input
                   type="datetime-local"
                   value={formData.delivery_window_start}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setFormData({
                       ...formData,
                       delivery_window_start: e.target.value,
-                    })
-                  }
+                    });
+                    if (order) setHasUnsavedChanges(true);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
                 />
               </div>
@@ -436,12 +441,13 @@ export function OrderFormModal({
                 <input
                   type="datetime-local"
                   value={formData.delivery_window_end}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setFormData({
                       ...formData,
                       delivery_window_end: e.target.value,
-                    })
-                  }
+                    });
+                    if (order) setHasUnsavedChanges(true);
+                  }}
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500"
                 />
               </div>
