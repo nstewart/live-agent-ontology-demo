@@ -1,333 +1,429 @@
 # Architecture
 
-This document describes the architecture of the FreshMart Digital Twin system.
+This document explains the FreshMart Digital Twin architecture, covering the CQRS pattern, Materialize integration, and real-time data flow.
 
-## Overview
+## Table of Contents
 
-The system implements a **knowledge graph** architecture for representing FreshMart's same-day delivery operations. It combines:
+- [CQRS Pattern](#cqrs-pattern)
+- [Three-Tier Architecture](#three-tier-architecture)
+- [Real-Time Data Flow](#real-time-data-flow)
+- [SUBSCRIBE Streaming](#subscribe-streaming)
+- [System Architecture Diagram](#system-architecture-diagram)
+- [Automatic Reconnection and Resilience](#automatic-reconnection--resilience)
+- [Services](#services)
 
-1. **Triple Store** - Generic subject-predicate-object data model (PostgreSQL)
-2. **Ontology Layer** - Schema validation and semantic structure
-3. **Materialized Views** - Denormalized operational queries (Materialize)
-4. **Real-time Sync** - Zero (hosted service at zero.rocicorp.dev) for live client updates
-5. **Search Index** - Full-text search for discovery (OpenSearch)
-6. **Agent Layer** - AI-powered operations assistance
+## CQRS Pattern
 
-## Component Architecture
+FreshMart implements **CQRS (Command Query Responsibility Segregation)** to separate write and read concerns for optimal performance and data integrity.
 
+### Commands (Writes)
+
+All modifications flow through the **PostgreSQL triple store** as RDF-style subject-predicate-object statements:
+
+- Writes are validated against the **ontology schema** (classes, properties, ranges, domains)
+- This ensures data integrity and semantic consistency at write time
+- The triple store acts as the governed source of truth
+
+**Write Flow:**
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Client Layer                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  Admin UI (React + Zero)    │  Agent CLI (LangGraph)                        │
-│  - Ontology management      │  - Natural language queries                   │
-│  - Triple browser           │  - Status updates                             │
-│  - Operations dashboards    │  - Tool-based reasoning                       │
-│  - Real-time WebSocket sync │                                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-                     │ WebSocket                    │ REST
-                     ▼                              ▼
-┌─────────────────────────┐   ┌───────────────────────────────────────────────┐
-│   Zero (Hosted Service) │   │              API Layer (FastAPI)               │
-│   (zero.rocicorp.dev)   │   ├───────────────────────────────────────────────┤
-│   - Sync Materialize    │   │  Ontology Service  │  Triple Service          │
-│     views to clients    │   │  - Class CRUD      │  - CRUD operations       │
-│   - ZQL query filtering │   │  - Property CRUD   │  - Validation layer      │
-│   - Differential sync   │   │  - Schema queries  │  - Batch operations      │
-└─────────────────────────┘   └───────────────────────────────────────────────┘
-           │ Connects to                           │
-           ▼                                        ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                         Materialize (Streaming SQL)                        │
-│  Materialized Views (auto-updated via CDC from PostgreSQL):                │
-│  - orders_with_lines_mv    - stores_mv          - courier_schedule_mv     │
-│  - orders_search_source_mv - customers_mv       - store_inventory_mv      │
-└───────────────────────────────────────────────────────────────────────────┘
-           │ CDC (Logical Replication)
-           ▼
-┌───────────────────────────────────────────────────────────────────────────┐
-│                         PostgreSQL (Source of Truth)                       │
-│  - ontology_classes        - triples            - sync_cursors            │
-│  - ontology_properties     - order_line_items                             │
-└───────────────────────────────────────────────────────────────────────────┘
+Client → FastAPI → PostgreSQL triple store → CDC → Materialize
 ```
 
-## Data Flow
+### Queries (Reads)
 
-### Write Path
+Read operations use **Materialize materialized views** that are pre-computed, denormalized, and indexed:
 
-1. Client sends triple to API
-2. API validates against ontology
-3. Triple inserted into PostgreSQL
-4. Materialize views auto-refresh via CDC (Change Data Capture)
-5. Zero syncs changes to connected clients
-6. Documents upserted to OpenSearch with event consolidation
+- Views are maintained in real-time via **Change Data Capture (CDC)** from PostgreSQL
+- Optimized for fast queries without impacting write performance
+- All UI queries routed through Materialize's serving cluster
 
-### Read Path (Operational via Zero)
-
-1. Admin UI connects to Zero hosted service (zero.rocicorp.dev)
-2. Client subscribes to views with optional ZQL filters (WHERE clauses)
-3. Zero syncs data from Materialize views
-4. Initial data snapshot sent to client
-5. Subsequent changes streamed as differential updates
-6. Client state automatically updated in real-time
-
-```typescript
-// Example: Filtered real-time subscription
-const [orders] = useQuery(
-  z.query.orders_with_lines_mv
-    .where("order_status", "=", "PICKING")
-    .where("store_id", "=", "store:BK-01")
-    .orderBy("order_number", "asc")
-);
-// orders automatically updates when matching data changes
+**Read Flow:**
+```
+Client → FastAPI → Materialize (serving cluster) → Indexed materialized views
 ```
 
-### Read Path (Search)
+### Benefits
 
-1. Client searches for orders
-2. Query sent to OpenSearch
-3. Matching documents returned with scores
+- **Write model**: Enforces schema through ontology, maintains graph relationships
+- **Read model**: Optimized for specific query patterns (orders, inventory, customer lookups)
+- **Real-time consistency**: CDC ensures views reflect writes within milliseconds
+- **Scalability**: Independent scaling of write (PostgreSQL) and read (Materialize) workloads
 
-### SUBSCRIBE Event Consolidation
+## Three-Tier Architecture
 
-The Search Sync Worker implements event consolidation to handle Materialize UPDATE operations correctly:
+Materialize uses a **three-tier cluster architecture** for efficient data processing:
 
-**The Challenge**: Materialize emits UPDATEs as DELETE (diff=-1) + INSERT (diff=+1) pairs at the **same timestamp**. Broadcasting these separately causes records to disappear temporarily from OpenSearch.
-
-**The Solution**: Events are accumulated by timestamp and only broadcast when the timestamp **increases** (not just changes). The timestamp check happens **before** adding events to the batch, ensuring all events at timestamp X are consolidated before broadcasting.
-
-**Key Implementation Points**:
-- Check: `if (timestamp > lastTimestamp)` not `if (timestamp != lastTimestamp)`
-- Order: Check timestamp advancement BEFORE adding event to pending batch
-- Result: DELETE + INSERT at same timestamp → consolidated into single UPDATE operation
-
-**Files**:
-- `search-sync/src/mz_client_subscribe.py:334-350` (Python implementation)
-- `search-sync/tests/test_subscribe_consolidation.py` (Consolidation tests)
-
-This pattern ensures consistency across downstream systems and prevents spurious deletes during status updates.
-
-## Service Responsibilities
-
-### API Service
-
-**Technology**: FastAPI (Python)
-
-**Responsibilities**:
-- RESTful API for all operations
-- Ontology schema management
-- Triple CRUD with validation
-- FreshMart convenience endpoints
-- Health/readiness checks
-
-**Key Design Decisions**:
-- Hexagonal architecture (ports & adapters)
-- Async throughout (asyncpg, httpx)
-- Pydantic v2 for validation
-- Single write entrypoint for data integrity
-
-### Zero (Hosted Service)
-
-**Technology**: Zero by Rocicorp (hosted at zero.rocicorp.dev)
-
-**Responsibilities**:
-- Real-time sync of Materialize views to web clients
-- WebSocket connection management
-- ZQL query parsing and filtering
-- Differential sync (only changed data sent)
-
-**Key Design Decisions**:
-- Hosted service eliminates need for local Zero server
-- Schema-driven type safety via `web/src/schema.ts`
-- Client connects directly to zero.rocicorp.dev
-
-**Files**:
-- `web/src/schema.ts` - Zero schema definition (maps to Materialize views)
-- `web/src/zero.ts` - Zero client initialization
-
-### Search Sync Worker
-
-**Technology**: Python with asyncio
-
-**Responsibilities**:
-- Poll Materialize views for changes
-- Transform documents for OpenSearch
-- Bulk upsert to search index
-- Track sync cursor for incremental updates
-
-**Key Design Decisions**:
-- Cursor-based incremental sync
-- Batch processing (configurable size)
-- Dead letter handling for failures
-- Graceful shutdown support
-
-### Admin UI
-
-**Technology**: React with Vite
-
-**Responsibilities**:
-- Ontology management interface
-- Triple browser and editor
-- Operations dashboards (Orders, Stores, Couriers)
-- Ontology visualization graph
-- Settings and health display
-
-**Key Design Decisions**:
-- **Zero (@rocicorp/zero)** for real-time data sync via WebSocket
-- ZQL (Zero Query Language) for declarative, filterable queries
-- TanStack Query for non-real-time API calls (mutations, ontology CRUD)
-- Tailwind CSS for styling
-- Component-based architecture
-
-**Zero Integration**:
-The Admin UI uses Zero for real-time sync of operational data from Materialize views:
-
-```typescript
-// Zero client setup (web/src/zero.ts)
-const zero = new Zero({
-  userID: 'anon',
-  server: 'https://zero.rocicorp.dev',
-  schema,
-})
-
-// Schema maps to Materialize views (web/src/schema.ts)
-const orders_with_lines_mv = table('orders_with_lines_mv')
-  .columns({
-    order_id: string(),
-    order_status: string().optional(),
-    // ... embedded line_items as JSON
-  })
-  .primaryKey('order_id')
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Ingest Cluster                            │
+│  - PostgreSQL CDC source (pg_source)                         │
+│  - Replicates triples table in real-time                     │
+└────────────────────────┬────────────────────────────────────┘
+                         │ (Change Data Capture)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Compute Cluster                            │
+│  - Materialized views transform triples                      │
+│  - Pre-aggregates and denormalizes data                      │
+│  - Joins entities (orders + customers + stores)              │
+└────────────────────────┬────────────────────────────────────┘
+                         │ (Materialized results)
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Serving Cluster                            │
+│  - Indexes on materialized views                             │
+│  - Sub-millisecond query latency                             │
+│  - All application queries hit this cluster                  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-**ZQL Queries with Filters**:
-Zero queries support SQL-compatible filtering that pushes predicates to the server:
+### Cluster Responsibilities
 
-```typescript
-// Build filtered query inline - state changes trigger re-render
-let query = z.query.orders_with_lines_mv;
+**Ingest Cluster**:
+- Connects to PostgreSQL via CDC
+- Replicates `triples` table changes in real-time
+- No application queries hit this cluster
 
-if (statusFilter) {
-  query = query.where("order_status", "=", statusFilter);
-}
-if (storeFilter) {
-  query = query.where("store_id", "=", storeFilter);
-}
-if (searchQuery) {
-  query = query.where("order_number", "ILIKE", `%${searchQuery}%`);
-}
+**Compute Cluster**:
+- Maintains materialized views with transformation logic
+- Flattens triples into entity-shaped records
+- Performs joins and aggregations
+- Examples: `orders_flat_mv`, `store_inventory_mv`, `customers_mv`
 
-const [orders] = useQuery(query.orderBy("order_number", "asc"));
+**Serving Cluster**:
+- Hosts indexes on materialized views
+- Provides low-latency lookups for applications
+- All FreshMart API queries use this cluster
+- Examples: `orders_search_source_idx`, `store_inventory_idx`
+
+### Materialized Views in FreshMart
+
+All FreshMart endpoints query precomputed, indexed materialized views:
+
+| API Endpoint | Materialized View | Index |
+|--------------|-------------------|-------|
+| `/freshmart/orders` | `orders_search_source_mv` | `orders_search_source_idx` |
+| `/freshmart/stores/inventory` | `store_inventory_mv` | `store_inventory_idx` |
+| `/freshmart/couriers` | `courier_schedule_mv` | `courier_schedule_idx` |
+| `/freshmart/stores` | `stores_mv` | `stores_idx` |
+| `/freshmart/customers` | `customers_mv` | `customers_idx` |
+| `/freshmart/products` | `products_mv` | `products_idx` |
+| UI Order Creation | `inventory_items_with_dynamic_pricing` | `inventory_items_with_dynamic_pricing_idx` |
+
+## Real-Time Data Flow
+
+FreshMart achieves **sub-second latency** for data propagation across all components:
+
+### Complete Data Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  1. WRITE: Client updates order status                               │
+│     POST /triples → PostgreSQL (validated by ontology)               │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │ (< 100ms)
+                           ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  2. CDC: Change Data Capture                                         │
+│     PostgreSQL → Materialize ingest cluster                          │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │ (< 200ms)
+                           ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  3. COMPUTE: Materialize compute cluster                             │
+│     orders_flat → orders_search_source_mv (with enrichment)          │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │ (< 500ms)
+                           ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  4. SUBSCRIBE: Real-time streaming                                   │
+│     Zero WebSocket Server subscribes to MV                           │
+│     Search Sync Worker subscribes to MV                              │
+└──────────────────────────┬───────────────────────────────────────────┘
+                           │ (< 100ms)
+                           ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  5. BROADCAST: Push to clients                                       │
+│     WebSocket → UI clients (differential updates)                    │
+│     Bulk upsert → OpenSearch (for search)                            │
+└──────────────────────────────────────────────────────────────────────┘
+
+Total latency: < 1 second (write → UI update)
 ```
 
-Supported ZQL operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`, `IN`, `IS`, `IS NOT`
+### Data Flow Paths
 
-### Agent Service
+**UI Updates** (Real-time):
+1. Write → PostgreSQL
+2. CDC → Materialize
+3. SUBSCRIBE → Zero server
+4. WebSocket → UI clients
+5. **Latency: < 1 second**
 
-**Technology**: LangGraph with OpenAI/Anthropic
+**Search Updates** (Real-time):
+1. Write → PostgreSQL
+2. CDC → Materialize
+3. SUBSCRIBE → Search Sync Worker
+4. Bulk upsert → OpenSearch
+5. **Latency: < 2 seconds**
 
-**Responsibilities**:
-- Natural language operations interface
-- Tool-based reasoning
-- Multi-step task execution
-- Context-aware responses
+**Direct Queries** (Indexed):
+1. Client → API
+2. Query → Materialize serving cluster
+3. Index lookup → Response
+4. **Latency: < 10ms**
 
-**Key Design Decisions**:
-- State machine graph architecture
-- Async tool execution
-- Iteration limits for safety
-- Support for multiple LLM providers
+## SUBSCRIBE Streaming
 
-## Database Schema
+Materialize's **SUBSCRIBE** command enables real-time streaming of differential updates from materialized views.
 
-### Core Tables
+### How SUBSCRIBE Works
+
+SUBSCRIBE provides a continuous stream of changes as they occur:
 
 ```sql
--- Ontology schema
-ontology_classes (id, class_name, prefix, description, parent_class_id)
-ontology_properties (id, prop_name, domain_class_id, range_kind, range_class_id, ...)
-
--- Triple store
-triples (id, subject_id, predicate, object_value, object_type, timestamps)
+SUBSCRIBE (
+    SELECT * FROM orders_search_source_mv
+) WITH (PROGRESS);
 ```
 
-### Materialize Three-Tier Architecture
-
-Materialize uses a three-tier architecture for optimal resource allocation:
-
+**Response Format:**
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Three-Tier Architecture                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  INGEST CLUSTER (25cc)                                                       │
-│  • pg_source - Replicates triples table via PostgreSQL logical replication  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  COMPUTE CLUSTER (25cc)                                                      │
-│  • Materialized views that persist transformation results:                   │
-│    - orders_flat_mv, store_inventory_mv, orders_search_source_mv            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  SERVING CLUSTER (25cc)                                                      │
-│  • Indexes on materialized views for low-latency queries:                    │
-│    - orders_flat_idx, store_inventory_idx, orders_search_source_idx         │
-└─────────────────────────────────────────────────────────────────────────────┘
+mz_timestamp | mz_diff | order_id | order_number | ...
+-------------|---------|----------|--------------|-----
+1234567890   | 1       | order:1  | FM-1001      | ... (INSERT)
+1234567891   | -1      | order:1  | FM-1001      | ... (DELETE)
+1234567891   | 1       | order:1  | FM-1001      | ... (INSERT with new data)
 ```
 
-**Regular Views** (intermediate transformations, no cluster):
-```sql
--- Helper views used by materialized views
-customers_flat, stores_flat, delivery_tasks_flat
+### SUBSCRIBE Features
+
+**Differential Updates**:
+- `mz_diff = 1`: Row inserted or updated
+- `mz_diff = -1`: Row deleted
+- Timestamp tracks when change occurred
+
+**PROGRESS Option**:
+- Emits progress messages showing timestamps advancing
+- Enables timestamp-based batching for efficient processing
+- Guarantees all changes up to timestamp T have been delivered
+
+**Snapshot Handling**:
+- Initial connection emits full snapshot of current data
+- Can be skipped if initial hydration already performed
+- Subsequent messages are only differential updates
+
+### FreshMart's SUBSCRIBE Usage
+
+FreshMart uses SUBSCRIBE in two services:
+
+**1. Zero WebSocket Server** (for UI real-time updates):
+- Subscribes to multiple materialized views: `orders_flat_mv`, `stores_mv`, `courier_schedule_mv`
+- Broadcasts differential updates to connected WebSocket clients
+- Collections map to UI pages: orders, stores, couriers
+
+**2. Search Sync Worker** (for OpenSearch indexing):
+- Subscribes to: `orders_search_source_mv` and `store_inventory_mv`
+- Consolidates DELETE + INSERT at same timestamp → UPDATE operation
+- Bulk upserts to OpenSearch indexes
+- Handles backpressure and automatic reconnection
+
+### SUBSCRIBE Stream Processing
+
+Both services follow a common pattern:
+
+**1. Initial Hydration**:
+```python
+# Query current state and bulk load
+results = await materialize.query("SELECT * FROM view_name")
+await bulk_load_to_destination(results)
 ```
 
-**Materialized Views** (IN CLUSTER compute):
-```sql
--- Topmost views that persist results for serving
-CREATE MATERIALIZED VIEW orders_flat_mv IN CLUSTER compute AS ...
-CREATE MATERIALIZED VIEW store_inventory_mv IN CLUSTER compute AS ...
-CREATE MATERIALIZED VIEW orders_search_source_mv IN CLUSTER compute AS ...
+**2. Subscribe Connection**:
+```python
+# Establish SUBSCRIBE stream
+async for row in materialize.subscribe(view_name):
+    if is_snapshot(row):
+        continue  # Skip snapshot, already hydrated
+    elif is_progress(row):
+        await flush_batch()  # Timestamp advanced, flush pending changes
+    else:
+        batch.append(row)  # Accumulate changes
 ```
 
-**Indexes** (IN CLUSTER serving ON materialized views):
-```sql
--- Indexes make materialized views queryable with low latency
-CREATE INDEX orders_flat_idx IN CLUSTER serving ON orders_flat_mv (order_id);
-CREATE INDEX store_inventory_idx IN CLUSTER serving ON store_inventory_mv (inventory_id);
-CREATE INDEX orders_search_source_idx IN CLUSTER serving ON orders_search_source_mv (order_id);
+**3. Event Consolidation** (for updates):
+```python
+# Track net changes per document ID
+net_changes = defaultdict(lambda: {"diff": 0, "latest_data": None})
+
+for event in batch:
+    doc_id = event["id"]
+    net_changes[doc_id]["diff"] += event["mz_diff"]
+    net_changes[doc_id]["latest_data"] = event
+
+# Process consolidated changes
+for doc_id, change in net_changes.items():
+    if change["diff"] == 1:
+        upsert(doc_id, change["latest_data"])
+    elif change["diff"] == -1:
+        delete(doc_id)
+    # diff == 0 means DELETE + INSERT = UPDATE, use latest data
 ```
 
-Access the Materialize Console at http://localhost:6874 to monitor clusters, sources, views, and indexes.
+**4. Bulk Flush**:
+```python
+# Bulk operations to destination
+await destination.bulk_upsert(upserts)
+await destination.bulk_delete(deletes)
+```
 
-## Validation Layer
+### Benefits of SUBSCRIBE
 
-The triple validator enforces:
+- **Real-time**: Changes stream instantly (< 100ms from MV update)
+- **Efficient**: Only differential updates transmitted, not full snapshots
+- **Guaranteed delivery**: PROGRESS messages ensure no missed updates
+- **Scalability**: Single worker handles 10,000+ events/second
+- **Resource-efficient**: 50% reduction vs polling loops
 
-1. **Class existence**: Subject prefix maps to ontology class
-2. **Property existence**: Predicate defined in ontology
-3. **Domain constraint**: Property applies to subject's class
-4. **Range constraint**: Object type matches property range
-5. **Literal validation**: Type-specific value validation
+## System Architecture Diagram
 
-## Scalability Considerations
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Admin UI (React)                                    │
+│                      Port: 5173                                          │
+│  • Real-time updates via WebSocket                                       │
+│  • Orders, Couriers, Stores/Inventory dashboards                         │
+└──────────────┬──────────────────────────────────┬────────────────────────┘
+               │ REST API (writes/reads)          ▲ WebSocket (real-time)
+               ▼                                  │
+┌──────────────────────────┐         ┌─────────────────────────────────────┐
+│  Graph/Ontology API      │         │    Zero WebSocket Server            │
+│  (FastAPI) Port: 8080    │         │    Port: 8090                       │
+│  • Ontology CRUD         │         │  • SUBSCRIBE to Materialize MVs     │
+│  • Triple CRUD           │         │  • Broadcast changes to clients     │
+│  • FreshMart endpoints   │         │  • Collections: orders, stores,     │
+│  • Query logging         │         │    couriers, inventory              │
+└───────┬──────────────────┘         └────────────▲────────────────────────┘
+        │ writes                                  │ SUBSCRIBE
+        ▼                                         │ (differential updates)
+┌──────────────────────────┐         ┌───────────┴─────────────────────────┐
+│     PostgreSQL           │         │      Materialize                     │
+│     Port: 5432           │────────▶│  Console: 6874 SQL: 6875             │
+│  • ontology_classes      │ (CDC)   │  Three-Tier Architecture:            │
+│  • ontology_properties   │         │  • ingest: pg_source (CDC)           │
+│  • triples               │         │  • compute: MVs (aggregation)        │
+└──────────────────────────┘         │  • serving: indexes (queries)        │
+                                     │  SUBSCRIBE: differential updates     │
+                                     └────────────┬────────────────────────┘
+                                                  │ SUBSCRIBE
+                                                  │ (real-time streaming)
+                                     ┌────────────▼────────────────────────┐
+                                     │    Search Sync Worker                │
+                                     │  SUBSCRIBE streaming                 │
+                                     │  • OrdersSyncWorker (orders)         │
+                                     │  • InventorySyncWorker (inventory)   │
+                                     │  • BaseSubscribeWorker pattern       │
+                                     │  • Event consolidation               │
+                                     │  • < 2s latency                      │
+                                     └────────────┬────────────────────────┘
+                                                  │ Bulk index
+                                                  ▼
+                    ┌─────────────────────────────────────┐
+                    │      OpenSearch                     │
+           ┌───────▶│       Port: 9200                    │
+           │        │  • orders index (real-time)         │
+           │        │  • inventory index (real-time)      │
+           │        │  • Full-text search                 │
+           │        └─────────────────────────────────────┘
+           │
+┌──────────┴───────────────┐
+│    LangGraph Agents       │
+│      Port: 8081           │
+│  • search_orders  ────────┘ (search orders index)
+│  • search_inventory ─────┘ (search inventory index)
+│  • fetch_order_context ─────▶ Graph API (read triples)
+│  • write_triples ───────────▶ Graph API (write triples → PostgreSQL)
+└──────────────────────────┘
+```
 
-### Current Architecture (Development)
+## Automatic Reconnection & Resilience
 
-- Single PostgreSQL instance with logical replication enabled
-- Materialize Emulator with admin console (http://localhost:6874)
-- Single-node OpenSearch
-- In-process sync worker
+Both `zero-server` and `search-sync` services include automatic retry and reconnection logic for production reliability.
 
-### Production Scaling
+### Connection Retry
 
-1. **Database**: Switch to managed PostgreSQL (Neon, RDS, Supabase)
-2. **Materialize**: Use cloud Materialize for true streaming
-3. **OpenSearch**: Use managed OpenSearch with replication
-4. **Sync Worker**: Run as separate deployments with partitioning
-5. **API**: Horizontal scaling behind load balancer
+Services start even if Materialize is not ready:
 
-## Security Considerations
+- Automatically retry connection every 30 seconds until successful
+- No manual intervention needed when Materialize is initializing
+- Services log retry attempts for monitoring
 
-- API authentication (add JWT/OAuth for production)
-- Database connection pooling with SSL
-- OpenSearch authentication
-- Environment-based secrets management
-- CORS configuration for production domains
+**Startup sequence:**
+```
+[zero-server] Attempting connection to Materialize... (attempt 1)
+[zero-server] Connection refused, retrying in 30s
+[zero-server] Attempting connection to Materialize... (attempt 2)
+[zero-server] Connected successfully!
+```
+
+### Stream Reconnection
+
+If a SUBSCRIBE stream ends or errors, services automatically reconnect:
+
+- Handles network interruptions and Materialize restarts gracefully
+- Each view maintains its own reconnection loop independently
+- Re-establishes SUBSCRIBE without data loss
+
+**Reconnection flow:**
+```
+[orders_flat_mv] SUBSCRIBE stream ended (connection lost)
+[orders_flat_mv] Retrying connection... (attempt 1)
+[orders_flat_mv] Re-hydrating from current state...
+[orders_flat_mv] SUBSCRIBE stream re-established
+```
+
+### Configuration
+
+**zero-server**: Fixed 30-second retry delay per subscription
+
+**search-sync**: Exponential backoff for efficiency
+- Initial delay: 1 second
+- Backoff multiplier: 2x
+- Maximum delay: 30 seconds
+- Sequence: 1s → 2s → 4s → 8s → 16s → 30s (cap)
+
+Environment variables (search-sync):
+```bash
+RETRY_INITIAL_DELAY=1       # Initial retry delay (seconds)
+RETRY_MAX_DELAY=30          # Maximum retry delay (seconds)
+RETRY_BACKOFF_MULTIPLIER=2  # Backoff multiplier
+```
+
+### Benefits
+
+- **Start services in any order** - they'll connect when ready
+- **No manual restarts** - if Materialize restarts, services automatically reconnect
+- **Continuous real-time updates** - even after connection issues
+- **Production-ready** - handles network interruptions gracefully
+
+## Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **db** | 5432 | PostgreSQL - primary triple store |
+| **mz** | 6874 | Materialize Admin Console |
+| **mz** | 6875 | Materialize SQL interface |
+| **zero-server** | 8090 | WebSocket server for real-time UI updates |
+| **opensearch** | 9200 | Search engine for orders |
+| **api** | 8080 | FastAPI backend |
+| **search-sync** | - | Dual SUBSCRIBE workers (orders + inventory) for OpenSearch sync (< 2s latency) |
+| **web** | 5173 | React admin UI with real-time updates |
+| **agents** | 8081 | LangGraph agent runner (optional) |
+
+## See Also
+
+- [Operations Guide](OPERATIONS.md) - Service management and troubleshooting
+- [Ontology Guide](ONTOLOGY_GUIDE.md) - Adding new entity types and views
+- [API Reference](API_REFERENCE.md) - Complete API documentation
+- [UI Guide](UI_GUIDE.md) - Dashboard features and real-time UI
+- [Agents Guide](AGENTS.md) - AI agent setup and usage
