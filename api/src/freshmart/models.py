@@ -166,3 +166,20 @@ class OrderWithLinesFlat(OrderFlat):
     computed_total: Optional[Decimal] = Field(None, description="Computed total from line items")
     has_perishable_items: Optional[bool] = Field(None, description="Whether order contains perishable items")
     total_weight_kg: Optional[Decimal] = Field(None, description="Total weight in kg")
+
+
+class OrderAtomicUpdate(BaseModel):
+    """Atomic update for order fields and line items in a single transaction."""
+
+    # Order fields
+    order_status: Optional[str] = Field(None, description="Order status")
+    customer_id: Optional[str] = Field(None, description="Customer ID")
+    store_id: Optional[str] = Field(None, description="Store ID")
+    delivery_window_start: Optional[str] = Field(None, description="Delivery window start (ISO 8601)")
+    delivery_window_end: Optional[str] = Field(None, description="Delivery window end (ISO 8601)")
+
+    # Line items - the complete desired state
+    line_items: list[OrderLineCreate] = Field(
+        default_factory=list,
+        description="Complete list of desired line items (replaces all existing)",
+    )

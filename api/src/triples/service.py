@@ -203,10 +203,10 @@ class TripleService:
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"🔵 PG_TXN_START: Writing {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
+            f"  📝 [BATCH INSERT] Writing {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
         )
         for subject_id, predicates in subjects.items():
-            logger.info(f"  📝 {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
+            logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
 
         # Validate all triples if needed
         if self.validate:
@@ -256,7 +256,7 @@ class TripleService:
         ]
 
         logger.info(
-            f"✅ PG_TXN_END: Successfully wrote {len(created)} triples"
+            f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
         )
 
         return created
@@ -307,10 +307,10 @@ class TripleService:
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"🔵 PG_TXN_START: Upserting {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
+            f"  📝 [BATCH UPSERT] Upserting {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
         )
         for subject_id, predicates in subjects.items():
-            logger.info(f"  📝 {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
+            logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
 
         # Validate if needed
         if self.validate:
@@ -380,7 +380,7 @@ class TripleService:
         ]
 
         logger.info(
-            f"✅ PG_TXN_END: Successfully upserted {len(upserted)} triples"
+            f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
         )
 
         return upserted

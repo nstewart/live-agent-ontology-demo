@@ -246,6 +246,17 @@ export const freshmartApi = {
     ),
   deleteOrderLine: (orderId: string, lineId: string) =>
     apiClient.delete(`/freshmart/orders/${encodeURIComponent(orderId)}/line-items/${encodeURIComponent(lineId)}`),
+
+  // Atomic order update (order fields + line items in single transaction)
+  atomicUpdateOrder: (orderId: string, data: {
+    order_status?: string
+    customer_id?: string
+    store_id?: string
+    delivery_window_start?: string
+    delivery_window_end?: string
+    line_items: OrderLineCreate[]
+  }) =>
+    apiClient.put(`/freshmart/orders/${encodeURIComponent(orderId)}/atomic`, data),
 }
 
 export const healthApi = {

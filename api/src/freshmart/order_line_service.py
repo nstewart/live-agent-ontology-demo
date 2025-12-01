@@ -458,3 +458,111 @@ class OrderLineService:
         )
         # Each line item has 7 triples, so divide by 7
         return result.rowcount // 7
+
+    async def atomic_update_order_with_lines(
+        self,
+        order_id: str,
+        order_status: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        store_id: Optional[str] = None,
+        delivery_window_start: Optional[str] = None,
+        delivery_window_end: Optional[str] = None,
+        line_items: list[OrderLineCreate] = None,
+    ) -> OrderLineFlat:
+        """
+        Atomically update order fields and replace all line items in a single transaction.
+
+        This method ensures that both order field updates and line item replacements
+        happen atomically - either all succeed or all fail together.
+
+        Args:
+            order_id: Order ID to update
+            order_status: New order status (optional)
+            customer_id: New customer ID (optional)
+            store_id: New store ID (optional)
+            delivery_window_start: New delivery window start (optional)
+            delivery_window_end: New delivery window end (optional)
+            line_items: Complete new set of line items (replaces all existing)
+
+        Returns:
+            Updated order data
+
+        Raises:
+            ValueError: If order not found or validation fails
+        """
+        logger.info(f"🔵 [ATOMIC UPDATE] Starting atomic update for {order_id} with {len(line_items) if line_items else 0} line items")
+
+        # Build order field triples to upsert
+        order_triples: list[TripleCreate] = []
+
+        if order_status is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="order_status",
+                    object_value=order_status,
+                    object_type="string",
+                )
+            )
+
+        if customer_id is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="placed_by",
+                    object_value=customer_id,
+                    object_type="entity_ref",
+                )
+            )
+
+        if store_id is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="order_store",
+                    object_value=store_id,
+                    object_type="entity_ref",
+                )
+            )
+
+        if delivery_window_start is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="delivery_window_start",
+                    object_value=delivery_window_start,
+                    object_type="timestamp",
+                )
+            )
+
+        if delivery_window_end is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="delivery_window_end",
+                    object_value=delivery_window_end,
+                    object_type="timestamp",
+                )
+            )
+
+        # Step 1: Upsert order fields (if any)
+        if order_triples:
+            logger.info(f"  [STEP 1/3] Upserting {len(order_triples)} order field(s)")
+            await self.triple_service.upsert_triples_batch(order_triples)
+
+        # Step 2: Delete all existing line items
+        logger.info(f"  [STEP 2/3] Deleting all existing line items for {order_id}")
+        deleted_count = await self.delete_order_lines(order_id)
+        logger.info(f"  [STEP 2/3] Deleted {deleted_count} existing line item(s)")
+
+        # Step 3: Create new line items (if any)
+        if line_items:
+            logger.info(f"  [STEP 3/3] Creating {len(line_items)} new line item(s)")
+            await self.create_line_items_batch(order_id, line_items)
+
+        logger.info(f"✅ [ATOMIC UPDATE] Completed atomic update for {order_id} (awaiting transaction commit)")
+
+        # Note: order_total_amount will be auto-calculated by the materialized view
+        # based on the new line items
+
+        return None  # Could return updated order if needed
