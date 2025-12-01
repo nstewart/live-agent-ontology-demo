@@ -22,6 +22,7 @@ import argparse
 import os
 import random
 import sys
+import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Tuple
@@ -1034,7 +1035,9 @@ class DataGenerator:
 
             order_total = Decimal("0.00")
             for line_num, product_id in enumerate(line_products, 1):
-                line_id = f"order_line:FM-{i+1:06d}-{line_num}"
+                # Use UUID-based line IDs (consistent with order_line_service.py)
+                line_uuid = str(uuid.uuid4())
+                line_id = f"orderline:{line_uuid}"
                 quantity = random.randint(1, 4)
                 # Get a reasonable price
                 unit_price = Decimal(str(random.uniform(2.0, 15.0))).quantize(Decimal("0.01"))

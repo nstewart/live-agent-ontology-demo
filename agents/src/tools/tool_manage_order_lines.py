@@ -155,7 +155,7 @@ async def manage_order_lines(
                         "error": "Quantity exceeds maximum allowed (1000)"
                     }
 
-                # Verify order exists
+                # Verify order exists and get store_id for inventory check
                 order_response = await client.get(
                     f"{settings.agent_api_base}/freshmart/orders/{order_id}",
                     timeout=10.0,
@@ -170,6 +170,56 @@ async def manage_order_lines(
                         "success": False,
                         "error": f"Failed to verify order existence (status {order_response.status_code})"
                     }
+
+                order_data = order_response.json()
+                store_id = order_data.get("store_id")
+
+                # Validate stock availability at the order's store
+                if store_id:
+                    try:
+                        inventory_query = {
+                            "query": {
+                                "bool": {
+                                    "must": [
+                                        {"term": {"store_id": store_id}},
+                                        {"term": {"product_id": product_id}}
+                                    ]
+                                }
+                            },
+                            "size": 1,
+                        }
+
+                        inventory_response = await client.post(
+                            f"{settings.agent_os_base}/inventory/_search",
+                            json=inventory_query,
+                            timeout=10.0,
+                        )
+                        inventory_response.raise_for_status()
+                        inventory_data = inventory_response.json()
+
+                        hits = inventory_data.get("hits", {}).get("hits", [])
+                        if hits:
+                            inventory = hits[0]["_source"]
+                            stock_level = inventory.get("stock_level", 0)
+
+                            if stock_level < quantity:
+                                return {
+                                    "success": False,
+                                    "error": f"Insufficient stock for {product_id}",
+                                    "requested": quantity,
+                                    "available": stock_level,
+                                    "store_id": store_id,
+                                }
+                        else:
+                            return {
+                                "success": False,
+                                "error": f"Product {product_id} not available at store {store_id}",
+                                "store_id": store_id,
+                            }
+                    except httpx.HTTPError as e:
+                        # Log the error but continue - inventory validation is best-effort
+                        # The server-side might have additional validation
+                        pass
 
                 # Get product info to determine perishable flag
                 product_response = await client.get(
