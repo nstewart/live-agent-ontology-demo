@@ -12,6 +12,7 @@ from src.db.client import get_mz_session_factory, get_pg_session_factory
 from src.freshmart.models import (
     CourierSchedule,
     CustomerInfo,
+    OrderAtomicUpdate,
     OrderFilter,
     OrderFlat,
     OrderLineBatchCreate,
@@ -62,12 +63,18 @@ async def get_freshmart_service(session: AsyncSession = Depends(get_session)) ->
 
 async def get_pg_write_session() -> AsyncSession:
     """Dependency to get PostgreSQL session for write operations."""
+    import logging
+    logger = logging.getLogger(__name__)
+
     factory = get_pg_session_factory()
     async with factory() as session:
         try:
             yield session
+            logger.info("🔵 [TRANSACTION] Committing PostgreSQL transaction")
             await session.commit()
-        except Exception:
+            logger.info("✅ [TRANSACTION] PostgreSQL transaction committed successfully")
+        except Exception as e:
+            logger.error(f"❌ [TRANSACTION] PostgreSQL transaction failed, rolling back: {e}")
             await session.rollback()
             raise
 
@@ -126,6 +133,67 @@ async def get_order(order_id: str, service: FreshMartService = Depends(get_fresh
     return order
 
 
+@router.put("/orders/{order_id:path}/atomic", status_code=status.HTTP_200_OK)
+async def atomic_update_order(
+    order_id: str,
+    data: OrderAtomicUpdate,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """
+    Atomically update an order's fields and line items in a single transaction.
+
+    This endpoint ensures that both order field updates and line item replacements
+    happen atomically - either all succeed or all fail together. This prevents
+    inconsistent state where order fields are updated but line items aren't (or vice versa).
+
+    The line_items array represents the complete desired state - all existing line items
+    will be deleted and replaced with the provided items.
+
+    Example:
+    ```json
+    {
+      "order_status": "PICKING",
+      "customer_id": "customer:CUST-001",
+      "store_id": "store:BK-01",
+      "delivery_window_start": "2024-01-15T14:00:00Z",
+      "delivery_window_end": "2024-01-15T16:00:00Z",
+      "line_items": [
+        {
+          "product_id": "product:PROD-001",
+          "quantity": 2,
+          "unit_price": 12.50,
+          "line_sequence": 1,
+          "perishable_flag": true
+        }
+      ]
+    }
+    ```
+
+    Note: order_total_amount is auto-calculated by the materialized view based on line items.
+    """
+    try:
+        await service.atomic_update_order_with_lines(
+            order_id=order_id,
+            order_status=data.order_status,
+            customer_id=data.customer_id,
+            store_id=data.store_id,
+            delivery_window_start=data.delivery_window_start,
+            delivery_window_end=data.delivery_window_end,
+            line_items=data.line_items,
+        )
+        return {"success": True, "order_id": order_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except TripleValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Triple validation failed",
+                "errors": [err.model_dump() for err in e.validation_result.errors],
+            },
+        )
+
+
 # =============================================================================
 # Stores & Inventory
 # =============================================================================
@@ -178,6 +246,15 @@ async def list_customers(service: FreshMartService = Depends(get_freshmart_servi
 async def list_products(service: FreshMartService = Depends(get_freshmart_service)):
     """List all products."""
     return await service.list_products()
+
+
+@router.get("/products/{product_id:path}", response_model=ProductInfo)
+async def get_product(product_id: str, service: FreshMartService = Depends(get_freshmart_service)):
+    """Get product information by ID."""
+    product = await service.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
 
 
 @router.get("/stores/{store_id:path}", response_model=StoreInfo)

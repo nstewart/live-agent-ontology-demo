@@ -474,14 +474,7 @@ export default function OrdersDashboardPage() {
           object_type: "entity_ref",
         },
       ];
-      if (data.order_total_amount) {
-        triples.push({
-          subject_id: orderId,
-          predicate: "order_total_amount",
-          object_value: data.order_total_amount,
-          object_type: "float",
-        });
-      }
+      // Note: order_total_amount is auto-computed by orders_flat_mv from line items, not stored in triples
       if (data.delivery_window_start) {
         triples.push({
           subject_id: orderId,
@@ -574,119 +567,32 @@ export default function OrdersDashboardPage() {
       data: OrderFormData;
       lineItems: CartLineItem[];
     }) => {
-      // Build triples for batch update
-      const fieldsToUpdate: {
-        predicate: string;
-        value: string;
-        type: TripleCreate["object_type"];
-      }[] = [
-        { predicate: "order_status", value: data.order_status, type: "string" },
-        { predicate: "placed_by", value: data.customer_id, type: "entity_ref" },
-        { predicate: "order_store", value: data.store_id, type: "entity_ref" },
-      ];
-      if (data.order_total_amount) {
-        fieldsToUpdate.push({
-          predicate: "order_total_amount",
-          value: data.order_total_amount,
-          type: "float",
-        });
-      }
-      if (data.delivery_window_start) {
-        fieldsToUpdate.push({
-          predicate: "delivery_window_start",
-          value: new Date(data.delivery_window_start).toISOString(),
-          type: "timestamp",
-        });
-      }
-      if (data.delivery_window_end) {
-        fieldsToUpdate.push({
-          predicate: "delivery_window_end",
-          value: new Date(data.delivery_window_end).toISOString(),
-          type: "timestamp",
-        });
-      }
-
-      // Upsert triples in a single atomic transaction
-      // The upsert endpoint deletes old values and inserts new ones - no duplicates
-      const triplesToUpsert: TripleCreate[] = fieldsToUpdate.map(field => ({
-        subject_id: order.order_id,
-        predicate: field.predicate,
-        object_value: field.value,
-        object_type: field.type,
+      // Build line items for atomic update
+      const lineItemsToCreate = lineItems.map((item, index) => ({
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_sequence: index + 1,
+        perishable_flag: item.perishable_flag,
       }));
 
-      // Single atomic transaction: deletes old predicates and inserts new values
-      if (triplesToUpsert.length > 0) {
-        await triplesApi.upsertBatch(triplesToUpsert);
-      }
+      // Only send changed order fields (avoid unnecessary triple updates)
+      const normalizeDate = (date: string | undefined | null) =>
+        date ? new Date(date).toISOString() : undefined;
 
-      // Handle line items: compare with existing line items
-      const existingLineItems = await freshmartApi
-        .listOrderLines(order.order_id)
-        .then((r: { data: any }) => r.data)
-        .catch(() => []);
-
-      // Build maps for easier lookup
-      const existingByProductId = new Map<string, any>(
-        existingLineItems.map((item: any) => [item.product_id, item])
-      );
-      const cartByProductId = new Map<string, CartLineItem>(
-        lineItems.map((item) => [item.product_id, item])
-      );
-
-      const lineItemOperations: Promise<any>[] = [];
-
-      // 1. Update quantities of existing items that changed
-      for (const existingItem of existingLineItems) {
-        const cartItem = cartByProductId.get(existingItem.product_id);
-        if (cartItem && cartItem.quantity !== existingItem.quantity) {
-          lineItemOperations.push(
-            freshmartApi.updateOrderLine(order.order_id, existingItem.line_id, {
-              quantity: cartItem.quantity,
-            })
-          );
-        }
-      }
-
-      // 2. Delete items removed from cart
-      for (const existingItem of existingLineItems) {
-        if (!cartByProductId.has(existingItem.product_id)) {
-          lineItemOperations.push(
-            freshmartApi.deleteOrderLine(order.order_id, existingItem.line_id)
-          );
-        }
-      }
-
-      // 3. Add new items in cart (not in existing line items)
-      const newItems = lineItems.filter(
-        (item) => !existingByProductId.has(item.product_id)
-      );
-      if (newItems.length > 0) {
-        // Get next sequence number
-        const maxSequence =
-          existingLineItems.length > 0
-            ? Math.max(
-                ...existingLineItems.map((item: any) => item.line_sequence)
-              )
-            : 0;
-
-        const lineItemsToCreate = newItems.map((item, index) => ({
-          product_id: item.product_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          line_sequence: maxSequence + index + 1,
-          perishable_flag: item.perishable_flag,
-        }));
-
-        lineItemOperations.push(
-          freshmartApi.createOrderLinesBatch(order.order_id, lineItemsToCreate)
-        );
-      }
-
-      // Execute all line item operations
-      if (lineItemOperations.length > 0) {
-        await Promise.all(lineItemOperations);
-      }
+      await freshmartApi.atomicUpdateOrder(order.order_id, {
+        // Only include fields that changed
+        order_status: data.order_status !== order.order_status ? data.order_status : undefined,
+        customer_id: data.customer_id !== order.customer_id ? data.customer_id : undefined,
+        store_id: data.store_id !== order.store_id ? data.store_id : undefined,
+        delivery_window_start: normalizeDate(data.delivery_window_start) !== normalizeDate(order.delivery_window_start)
+          ? normalizeDate(data.delivery_window_start)
+          : undefined,
+        delivery_window_end: normalizeDate(data.delivery_window_end) !== normalizeDate(order.delivery_window_end)
+          ? normalizeDate(data.delivery_window_end)
+          : undefined,
+        line_items: lineItemsToCreate,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });

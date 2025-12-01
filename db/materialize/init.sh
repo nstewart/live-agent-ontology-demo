@@ -117,29 +117,103 @@ echo "Creating materialized views IN CLUSTER compute..."
 # Create materialized views in compute cluster
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW IF NOT EXISTS orders_flat_mv IN CLUSTER compute AS
+WITH order_line_amounts AS (
+    -- Extract line_amount for each orderline
+    SELECT
+        subject_id AS line_id,
+        MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+        MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount
+    FROM triples
+    WHERE subject_id LIKE 'orderline:%'
+    GROUP BY subject_id
+),
+order_totals AS (
+    -- Aggregate line amounts per order BEFORE joining with order triples
+    SELECT
+        order_id,
+        COALESCE(SUM(line_amount), 0.00)::DECIMAL(10,2) AS computed_total
+    FROM order_line_amounts
+    GROUP BY order_id
+)
 SELECT
-    subject_id AS order_id,
-    MAX(CASE WHEN predicate = 'order_number' THEN object_value END) AS order_number,
-    MAX(CASE WHEN predicate = 'order_status' THEN object_value END) AS order_status,
-    MAX(CASE WHEN predicate = 'order_store' THEN object_value END) AS store_id,
-    MAX(CASE WHEN predicate = 'placed_by' THEN object_value END) AS customer_id,
-    MAX(CASE WHEN predicate = 'delivery_window_start' THEN object_value END) AS delivery_window_start,
-    MAX(CASE WHEN predicate = 'delivery_window_end' THEN object_value END) AS delivery_window_end,
-    MAX(CASE WHEN predicate = 'order_total_amount' THEN object_value END)::DECIMAL(10,2) AS order_total_amount,
+    o.subject_id AS order_id,
+    MAX(CASE WHEN o.predicate = 'order_number' THEN o.object_value END) AS order_number,
+    MAX(CASE WHEN o.predicate = 'order_status' THEN o.object_value END) AS order_status,
+    MAX(CASE WHEN o.predicate = 'order_store' THEN o.object_value END) AS store_id,
+    MAX(CASE WHEN o.predicate = 'placed_by' THEN o.object_value END) AS customer_id,
+    MAX(CASE WHEN o.predicate = 'delivery_window_start' THEN o.object_value END) AS delivery_window_start,
+    MAX(CASE WHEN o.predicate = 'delivery_window_end' THEN o.object_value END) AS delivery_window_end,
+    -- COMPUTED from line items (not from triple) - auto-calculated, always accurate
+    COALESCE(ot.computed_total, 0.00)::DECIMAL(10,2) AS order_total_amount,
+    MAX(o.updated_at) AS effective_updated_at
+FROM triples o
+LEFT JOIN order_totals ot ON ot.order_id = o.subject_id
+WHERE o.subject_id LIKE 'order:%'
+GROUP BY o.subject_id, ot.computed_total;"
+
+echo "Creating order line views..."
+
+# Order lines base view
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS order_lines_base AS
+SELECT
+    subject_id AS line_id,
+    MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+    MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
+    MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
+    MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+    MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
+    MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
+    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
     MAX(updated_at) AS effective_updated_at
 FROM triples
-WHERE subject_id LIKE 'order:%'
+WHERE subject_id LIKE 'orderline:%'
 GROUP BY subject_id;"
+
+# Order lines flat materialized view with product enrichment
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
+SELECT
+    ol.line_id,
+    ol.order_id,
+    ol.product_id,
+    ol.quantity,
+    ol.unit_price,
+    ol.line_amount,
+    ol.line_sequence,
+    ol.perishable_flag,
+    p.product_name,
+    p.category,
+    p.unit_price AS current_product_price,
+    p.unit_weight_grams,
+    ol.effective_updated_at
+FROM order_lines_base ol
+LEFT JOIN products_flat p ON p.product_id = ol.product_id;"
 
 # Drop first to ensure schema updates are applied
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP MATERIALIZED VIEW IF EXISTS store_inventory_mv CASCADE;" 2>/dev/null
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW store_inventory_mv IN CLUSTER compute AS
+WITH order_reservations AS (
+    -- Calculate reserved quantity per product per store from pending orders
+    SELECT
+        o.store_id,
+        ol.product_id,
+        SUM(ol.quantity) AS reserved_quantity
+    FROM order_lines_flat_mv ol
+    JOIN orders_flat_mv o ON o.order_id = ol.order_id
+    WHERE o.order_status IN ('CREATED', 'PICKING', 'OUT_FOR_DELIVERY')
+    GROUP BY o.store_id, ol.product_id
+)
 SELECT
     inv.inventory_id,
     inv.store_id,
     inv.product_id,
     inv.stock_level,
+    -- NEW: Reserved quantity from pending orders
+    COALESCE(res.reserved_quantity, 0)::INT AS reserved_quantity,
+    -- NEW: Available quantity (stock minus reservations)
+    GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0)::INT AS available_quantity,
     inv.replenishment_eta,
     inv.effective_updated_at,
     -- Product details
@@ -152,13 +226,14 @@ SELECT
     s.store_name,
     s.store_zone,
     s.store_address,
-    -- Availability flags
+    -- Availability flags (based on AVAILABLE quantity, not total stock)
     CASE
-        WHEN inv.stock_level > 10 THEN 'IN_STOCK'
-        WHEN inv.stock_level > 0 THEN 'LOW_STOCK'
+        WHEN GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 10 THEN 'IN_STOCK'
+        WHEN GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 0 THEN 'LOW_STOCK'
         ELSE 'OUT_OF_STOCK'
     END AS availability_status,
-    (inv.stock_level <= 10 AND inv.stock_level > 0) AS low_stock
+    (GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) <= 10
+     AND GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 0) AS low_stock
 FROM (
     SELECT
         subject_id AS inventory_id,
@@ -171,6 +246,7 @@ FROM (
     WHERE subject_id LIKE 'inventory:%'
     GROUP BY subject_id
 ) inv
+LEFT JOIN order_reservations res ON res.store_id = inv.store_id AND res.product_id = inv.product_id
 LEFT JOIN products_flat p ON p.product_id = inv.product_id
 LEFT JOIN stores_flat s ON s.store_id = inv.store_id;"
 
@@ -285,43 +361,6 @@ SELECT
 FROM triples
 WHERE subject_id LIKE 'product:%'
 GROUP BY subject_id;"
-echo "Creating order line views..."
-
-# Order lines base view
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS order_lines_base AS
-SELECT
-    subject_id AS line_id,
-    MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
-    MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
-    MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
-    MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
-    MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
-    MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
-    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
-    MAX(updated_at) AS effective_updated_at
-FROM triples
-WHERE subject_id LIKE 'orderline:%'
-GROUP BY subject_id;"
-# Order lines flat materialized view with product enrichment
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
-SELECT
-    ol.line_id,
-    ol.order_id,
-    ol.product_id,
-    ol.quantity,
-    ol.unit_price,
-    ol.line_amount,
-    ol.line_sequence,
-    ol.perishable_flag,
-    p.product_name,
-    p.category,
-    p.unit_price AS current_product_price,
-    p.unit_weight_grams,
-    ol.effective_updated_at
-FROM order_lines_base ol
-LEFT JOIN products_flat p ON p.product_id = ol.product_id;"
 
 echo "Creating dynamic pricing view..."
 
@@ -465,6 +504,8 @@ SELECT
   inv.product_name,
   inv.category,
   inv.stock_level,
+  inv.reserved_quantity,
+  inv.available_quantity,
   inv.perishable,
   inv.unit_price AS base_price,
 
@@ -484,10 +525,10 @@ SELECT
     ELSE 1.0
   END AS perishable_adjustment,
 
-  -- Low stock at this specific store gets additional premium
+  -- Low available stock at this specific store gets additional premium
   CASE
-    WHEN inv.stock_level <= 5 THEN 1.10
-    WHEN inv.stock_level <= 15 THEN 1.03
+    WHEN inv.available_quantity <= 5 THEN 1.10
+    WHEN inv.available_quantity <= 15 THEN 1.03
     ELSE 1.0
   END AS local_stock_adjustment,
 
@@ -499,7 +540,7 @@ SELECT
   pf.sale_count AS product_sale_count,
   pf.total_stock AS product_total_stock,
 
-  -- Computed dynamic price with all factors
+  -- Computed dynamic price with all factors (using available quantity, not total stock)
   ROUND(
     COALESCE(inv.unit_price, 0) *
     CASE WHEN inv.store_zone = 'MAN' THEN 1.15
@@ -509,8 +550,8 @@ SELECT
          WHEN inv.store_zone = 'SI' THEN 0.95
          ELSE 1.00 END *
     CASE WHEN inv.perishable = TRUE THEN 0.95 ELSE 1.0 END *
-    CASE WHEN inv.stock_level <= 5 THEN 1.10
-         WHEN inv.stock_level <= 15 THEN 1.03
+    CASE WHEN inv.available_quantity <= 5 THEN 1.10
+         WHEN inv.available_quantity <= 15 THEN 1.03
          ELSE 1.0 END *
     COALESCE(pf.popularity_adjustment, 1.0) *
     COALESCE(pf.scarcity_adjustment, 1.0) *
@@ -529,8 +570,8 @@ SELECT
            WHEN inv.store_zone = 'SI' THEN 0.95
            ELSE 1.00 END *
       CASE WHEN inv.perishable = TRUE THEN 0.95 ELSE 1.0 END *
-      CASE WHEN inv.stock_level <= 5 THEN 1.10
-           WHEN inv.stock_level <= 15 THEN 1.03
+      CASE WHEN inv.available_quantity <= 5 THEN 1.10
+           WHEN inv.available_quantity <= 15 THEN 1.03
            ELSE 1.0 END *
       COALESCE(pf.popularity_adjustment, 1.0) *
       COALESCE(pf.scarcity_adjustment, 1.0) *

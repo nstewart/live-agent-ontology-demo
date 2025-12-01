@@ -181,32 +181,32 @@ class TripleService:
                 subjects[triple.subject_id] = []
             subjects[triple.subject_id].append(triple.predicate)
 
-        # Determine which OpenSearch indices will be affected
-        indices_affected = {}
-        index_map = {
-            "order": "orders",
-            "orderline": "orders",
-            "inventory": "inventory",
-            "product": "products",
-            "customer": "customers",
-            "store": "stores",
-            "courier": "couriers",
-        }
+        # Determine which entity types are affected and count triples per type
+        entity_types_affected = {}
+        entity_triples_count = {}
         for subject_id in subjects.keys():
             prefix = subject_id.split(":")[0]
-            index = index_map.get(prefix, prefix)
-            if index not in indices_affected:
-                indices_affected[index] = set()
-            indices_affected[index].add(subject_id)
+            if prefix not in entity_types_affected:
+                entity_types_affected[prefix] = set()
+            entity_types_affected[prefix].add(subject_id)
 
-        indices_summary = ", ".join([f"{idx} ({len(docs)} docs)" for idx, docs in indices_affected.items()])
+        # Count triples per entity type
+        for triple in triples:
+            prefix = triple.subject_id.split(":")[0]
+            entity_triples_count[prefix] = entity_triples_count.get(prefix, 0) + 1
+
+        # Create summary showing entity types with triple counts (e.g., "1 order (5 triples), 2 orderlines (6 triples)")
+        entity_summary = ", ".join([
+            f"{len(docs)} {entity_type}{'s' if len(docs) != 1 else ''} ({entity_triples_count[entity_type]} triples)"
+            for entity_type, docs in sorted(entity_types_affected.items())
+        ])
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"🔵 PG_TXN_START: Writing {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
+            f"  📝 [BATCH INSERT] Writing {len(triples)} triples → {entity_summary}"
         )
         for subject_id, predicates in subjects.items():
-            logger.info(f"  📝 {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
+            logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
 
         # Validate all triples if needed
         if self.validate:
@@ -256,7 +256,7 @@ class TripleService:
         ]
 
         logger.info(
-            f"✅ PG_TXN_END: Successfully wrote {len(created)} triples"
+            f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
         )
 
         return created
@@ -285,32 +285,32 @@ class TripleService:
                 subjects[triple.subject_id] = []
             subjects[triple.subject_id].append(triple.predicate)
 
-        # Determine which OpenSearch indices will be affected
-        indices_affected = {}
-        index_map = {
-            "order": "orders",
-            "orderline": "orders",
-            "inventory": "inventory",
-            "product": "products",
-            "customer": "customers",
-            "store": "stores",
-            "courier": "couriers",
-        }
+        # Determine which entity types are affected and count triples per type
+        entity_types_affected = {}
+        entity_triples_count = {}
         for subject_id in subjects.keys():
             prefix = subject_id.split(":", 1)[0]
-            index = index_map.get(prefix, prefix)
-            if index not in indices_affected:
-                indices_affected[index] = set()
-            indices_affected[index].add(subject_id)
+            if prefix not in entity_types_affected:
+                entity_types_affected[prefix] = set()
+            entity_types_affected[prefix].add(subject_id)
 
-        indices_summary = ", ".join([f"{idx} ({len(docs)} docs)" for idx, docs in indices_affected.items()])
+        # Count triples per entity type
+        for triple in triples:
+            prefix = triple.subject_id.split(":", 1)[0]
+            entity_triples_count[prefix] = entity_triples_count.get(prefix, 0) + 1
+
+        # Create summary showing entity types with triple counts (e.g., "1 order (5 triples), 2 orderlines (6 triples)")
+        entity_summary = ", ".join([
+            f"{len(docs)} {entity_type}{'s' if len(docs) != 1 else ''} ({entity_triples_count[entity_type]} triples)"
+            for entity_type, docs in sorted(entity_types_affected.items())
+        ])
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"🔵 PG_TXN_START: Upserting {len(triples)} triples across {len(subjects)} subjects → {indices_summary}"
+            f"  📝 [BATCH UPSERT] Upserting {len(triples)} triples → {entity_summary}"
         )
         for subject_id, predicates in subjects.items():
-            logger.info(f"  📝 {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
+            logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
 
         # Validate if needed
         if self.validate:
@@ -380,7 +380,7 @@ class TripleService:
         ]
 
         logger.info(
-            f"✅ PG_TXN_END: Successfully upserted {len(upserted)} triples"
+            f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
         )
 
         return upserted

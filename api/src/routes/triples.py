@@ -1,5 +1,6 @@
 """Triples API routes."""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,6 +19,7 @@ from src.triples.models import (
 from src.triples.service import TripleService, TripleValidationError
 
 router = APIRouter(prefix="/triples", tags=["Triples"])
+logger = logging.getLogger(__name__)
 
 
 async def get_session() -> AsyncSession:
@@ -25,9 +27,13 @@ async def get_session() -> AsyncSession:
     factory = get_pg_session_factory()
     async with factory() as session:
         try:
+            logger.info("🔵 [TRANSACTION] Starting PostgreSQL transaction")
             yield session
+            logger.info("🔵 [TRANSACTION] Committing PostgreSQL transaction")
             await session.commit()
-        except Exception:
+            logger.info("✅ [TRANSACTION] PostgreSQL transaction committed successfully")
+        except Exception as e:
+            logger.error(f"❌ [TRANSACTION] PostgreSQL transaction failed, rolling back: {e}")
             await session.rollback()
             raise
 

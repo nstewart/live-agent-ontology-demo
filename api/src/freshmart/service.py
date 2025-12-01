@@ -444,6 +444,33 @@ class FreshMartService:
             for row in rows
         ]
 
+    async def get_product(self, product_id: str) -> Optional["ProductInfo"]:
+        """Get a single product by ID."""
+        from src.freshmart.models import ProductInfo
+
+        view = self._get_view("products_flat")
+
+        result = await self.session.execute(
+            text(f"""
+                SELECT product_id, product_name, category, unit_price, perishable
+                FROM {view}
+                WHERE product_id = :product_id
+            """),
+            {"product_id": product_id}
+        )
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return ProductInfo(
+            product_id=row.product_id,
+            product_name=row.product_name,
+            category=row.category,
+            unit_price=row.unit_price,
+            perishable=row.perishable,
+        )
+
     # =========================================================================
     # Couriers
     # =========================================================================
