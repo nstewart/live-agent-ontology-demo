@@ -17,7 +17,7 @@ This project demonstrates a **live digital twin** of same-day grocery delivery o
 ## Who Is This For?
 
 - Developers building **AI agents** that reason over operational data
-- Teams building minimizing time-to-confident action based on changes to **semantic knowledge graphs** 
+- Teams minimizing time-to-confident action based on changes to **semantic knowledge graphs**
 - Projects requiring **live materialized views** over graph data with sub-second end-to-end latency
 - Organizations exploring **CQRS patterns** with ontology validation
 
@@ -292,18 +292,17 @@ freshmart-digital-twin-agent-starter/
 ### Implementation Guides
 - [SEARCH.md](docs/SEARCH.md) - OpenSearch setup, sync architecture, and debugging
 - [AGENTS.md](docs/AGENTS.md) - AI agent capabilities, tools, and integration patterns
-- [MATERIALIZE.md](docs/MATERIALIZE.md) - Materialize views, indexes, and three-tier architecture
-- [REAL_TIME.md](docs/REAL_TIME.md) - WebSocket protocol, Zero integration, and UI updates
+- [UI_GUIDE.md](docs/UI_GUIDE.md) - React Admin UI features and real-time updates
+- [ONTOLOGY_GUIDE.md](docs/ONTOLOGY_GUIDE.md) - Step-by-step guide to adding new entity types
 
 ### Operations
 - [CONTRIBUTING.md](docs/CONTRIBUTING.md) - Development setup, testing, and contribution guidelines
 - [API_REFERENCE.md](docs/API_REFERENCE.md) - Complete API endpoint documentation
 - [OPENSEARCH_SYNC_RUNBOOK.md](docs/OPENSEARCH_SYNC_RUNBOOK.md) - Troubleshooting search sync issues
+- [OPERATIONS.md](docs/OPERATIONS.md) - Service management and troubleshooting
 
 ### Advanced Topics
-- [CQRS_PATTERNS.md](docs/CQRS_PATTERNS.md) - CQRS implementation patterns and trade-offs
 - [DYNAMIC_PRICING.md](docs/DYNAMIC_PRICING.md) - Dynamic pricing implementation and configuration
-- [EXTENDING_ONTOLOGY.md](docs/EXTENDING_ONTOLOGY.md) - Step-by-step guide to adding new entity types
 
 ## Key Design Decisions
 
