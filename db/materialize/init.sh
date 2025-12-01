@@ -151,6 +151,45 @@ LEFT JOIN order_totals ot ON ot.order_id = o.subject_id
 WHERE o.subject_id LIKE 'order:%'
 GROUP BY o.subject_id, ot.computed_total;"
 
+echo "Creating order line views..."
+
+# Order lines base view
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS order_lines_base AS
+SELECT
+    subject_id AS line_id,
+    MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+    MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
+    MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
+    MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
+    MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
+    MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
+    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
+    MAX(updated_at) AS effective_updated_at
+FROM triples
+WHERE subject_id LIKE 'orderline:%'
+GROUP BY subject_id;"
+
+# Order lines flat materialized view with product enrichment
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
+SELECT
+    ol.line_id,
+    ol.order_id,
+    ol.product_id,
+    ol.quantity,
+    ol.unit_price,
+    ol.line_amount,
+    ol.line_sequence,
+    ol.perishable_flag,
+    p.product_name,
+    p.category,
+    p.unit_price AS current_product_price,
+    p.unit_weight_grams,
+    ol.effective_updated_at
+FROM order_lines_base ol
+LEFT JOIN products_flat p ON p.product_id = ol.product_id;"
+
 # Drop first to ensure schema updates are applied
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP MATERIALIZED VIEW IF EXISTS store_inventory_mv CASCADE;" 2>/dev/null
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
@@ -322,43 +361,6 @@ SELECT
 FROM triples
 WHERE subject_id LIKE 'product:%'
 GROUP BY subject_id;"
-echo "Creating order line views..."
-
-# Order lines base view
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS order_lines_base AS
-SELECT
-    subject_id AS line_id,
-    MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
-    MAX(CASE WHEN predicate = 'line_product' THEN object_value END) AS product_id,
-    MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT AS quantity,
-    MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2) AS unit_price,
-    MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount,
-    MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
-    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
-    MAX(updated_at) AS effective_updated_at
-FROM triples
-WHERE subject_id LIKE 'orderline:%'
-GROUP BY subject_id;"
-# Order lines flat materialized view with product enrichment
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
-SELECT
-    ol.line_id,
-    ol.order_id,
-    ol.product_id,
-    ol.quantity,
-    ol.unit_price,
-    ol.line_amount,
-    ol.line_sequence,
-    ol.perishable_flag,
-    p.product_name,
-    p.category,
-    p.unit_price AS current_product_price,
-    p.unit_weight_grams,
-    ol.effective_updated_at
-FROM order_lines_base ol
-LEFT JOIN products_flat p ON p.product_id = ol.product_id;"
 
 echo "Creating dynamic pricing view..."
 
