@@ -248,6 +248,15 @@ async def list_products(service: FreshMartService = Depends(get_freshmart_servic
     return await service.list_products()
 
 
+@router.get("/products/{product_id:path}", response_model=ProductInfo)
+async def get_product(product_id: str, service: FreshMartService = Depends(get_freshmart_service)):
+    """Get product information by ID."""
+    product = await service.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
+
+
 @router.get("/stores/{store_id:path}", response_model=StoreInfo)
 async def get_store(store_id: str, service: FreshMartService = Depends(get_freshmart_service)):
     """Get store information with inventory."""

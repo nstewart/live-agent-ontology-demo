@@ -1,6 +1,7 @@
 """Order Line service for CRUD operations on line items."""
 
 import logging
+import uuid
 from decimal import Decimal
 from typing import Optional
 
@@ -23,18 +24,14 @@ class OrderLineService:
         self.session = session
         self.triple_service = TripleService(session, validate=True)
 
-    def _generate_line_id(self, order_id: str, sequence: int) -> str:
-        """Generate line item ID from order ID and sequence.
-
-        Args:
-            order_id: Order ID (e.g., 'order:FM-1001')
-            sequence: Line sequence number (1, 2, 3, ...)
+    def _generate_line_id(self) -> str:
+        """Generate a unique UUID-based line item ID.
 
         Returns:
-            Line ID in format 'orderline:FM-1001-001'
+            Line ID in format 'orderline:<uuid>'
         """
-        order_number = order_id.split(":")[1]
-        return f"orderline:{order_number}-{sequence:03d}"
+        line_uuid = str(uuid.uuid4())
+        return f"orderline:{line_uuid}"
 
     async def _fetch_live_prices(
         self, store_id: str, product_ids: list[str]
@@ -109,22 +106,21 @@ class OrderLineService:
         return live_prices
 
     def _create_line_item_triples(
-        self, order_id: str, sequence: int, line_item: OrderLineCreate
+        self, line_id: str, order_id: str, line_item: OrderLineCreate
     ) -> list[TripleCreate]:
         """Generate triple records for a line item.
 
         Args:
+            line_id: Line item ID (UUID-based)
             order_id: Parent order ID
-            sequence: Line sequence number
             line_item: Line item data
 
         Returns:
             List of TripleCreate objects
         """
-        line_id = self._generate_line_id(order_id, sequence)
         line_amount = line_item.quantity * line_item.unit_price
 
-        return [
+        triples = [
             TripleCreate(
                 subject_id=line_id,
                 predicate="line_of_order",
@@ -157,17 +153,24 @@ class OrderLineService:
             ),
             TripleCreate(
                 subject_id=line_id,
-                predicate="line_sequence",
-                object_value=str(sequence),
-                object_type="int",
-            ),
-            TripleCreate(
-                subject_id=line_id,
                 predicate="perishable_flag",
                 object_value=str(line_item.perishable_flag).lower(),
                 object_type="bool",
             ),
         ]
+
+        # Add line_sequence triple only if provided
+        if line_item.line_sequence is not None:
+            triples.append(
+                TripleCreate(
+                    subject_id=line_id,
+                    predicate="line_sequence",
+                    object_value=str(line_item.line_sequence),
+                    object_type="int",
+                )
+            )
+
+        return triples
 
     async def create_line_items_batch(
         self, order_id: str, line_items: list[OrderLineCreate]
@@ -182,16 +185,13 @@ class OrderLineService:
             List of created line items
 
         Raises:
-            ValueError: If line_sequence values are not unique
+            ValueError: If line_sequence values are not unique (when provided)
             TripleValidationError: If triples fail ontology validation
         """
-        # Validate unique sequences
-        sequences = [item.line_sequence for item in line_items]
-        if len(sequences) != len(set(sequences)):
+        # Validate unique sequences if provided
+        sequences = [item.line_sequence for item in line_items if item.line_sequence is not None]
+        if sequences and len(sequences) != len(set(sequences)):
             raise ValueError("line_sequence values must be unique within an order")
-
-        # Sort by sequence for consistent ordering
-        sorted_items = sorted(line_items, key=lambda x: x.line_sequence)
 
         # Fetch store_id from order
         order_query = """
@@ -207,18 +207,22 @@ class OrderLineService:
             raise ValueError(f"Could not find store_id for order {order_id}")
 
         # Fetch live prices from inventory
-        product_ids = [item.product_id for item in sorted_items]
+        product_ids = [item.product_id for item in line_items]
         live_prices = await self._fetch_live_prices(store_id, product_ids)
 
         # Update line items with live prices from inventory
-        for item in sorted_items:
+        for item in line_items:
             if item.product_id in live_prices:
                 item.unit_price = live_prices[item.product_id]
 
-        # Generate all triples
+        # Generate all triples with UUID-based line IDs
         all_triples = []
-        for item in sorted_items:
-            triples = self._create_line_item_triples(order_id, item.line_sequence, item)
+        created_line_ids = []
+        for item in line_items:
+            # Use provided line_id or generate new UUID-based one
+            line_id = item.line_id if item.line_id else self._generate_line_id()
+            created_line_ids.append(line_id)
+            triples = self._create_line_item_triples(line_id, order_id, item)
             all_triples.extend(triples)
 
         # Create all triples in batch (validates and inserts in single transaction)

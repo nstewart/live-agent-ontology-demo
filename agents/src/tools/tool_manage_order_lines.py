@@ -1,5 +1,6 @@
 """Tool for managing order line items (add/update/delete)."""
 
+import uuid
 from typing import Optional
 
 import httpx
@@ -100,6 +101,18 @@ async def manage_order_lines(
                 if not line_id or not quantity:
                     return {"success": False, "error": "line_id and quantity are required for update action"}
 
+                # Validate quantity
+                if quantity <= 0:
+                    return {
+                        "success": False,
+                        "error": "Quantity must be positive"
+                    }
+                if quantity > 1000:
+                    return {
+                        "success": False,
+                        "error": "Quantity exceeds maximum allowed (1000)"
+                    }
+
                 response = await client.put(
                     f"{settings.agent_api_base}/freshmart/orders/{order_id}/line-items/{line_id}",
                     json={"quantity": quantity},
@@ -130,40 +143,62 @@ async def manage_order_lines(
                         "error": "product_id, quantity, and unit_price are required for add action"
                     }
 
-                # Get current line items to determine next sequence number
-                list_response = await client.get(
-                    f"{settings.agent_api_base}/freshmart/orders/{order_id}/line-items",
+                # Validate quantity
+                if quantity <= 0:
+                    return {
+                        "success": False,
+                        "error": "Quantity must be positive"
+                    }
+                if quantity > 1000:
+                    return {
+                        "success": False,
+                        "error": "Quantity exceeds maximum allowed (1000)"
+                    }
+
+                # Verify order exists
+                order_response = await client.get(
+                    f"{settings.agent_api_base}/freshmart/orders/{order_id}",
                     timeout=10.0,
                 )
-
-                if list_response.status_code == 200:
-                    existing_items = list_response.json()
-                    max_sequence = max([item.get("line_sequence", 0) for item in existing_items], default=0)
-                    next_sequence = max_sequence + 1
-                else:
-                    next_sequence = 1
+                if order_response.status_code == 404:
+                    return {
+                        "success": False,
+                        "error": f"Order {order_id} not found"
+                    }
+                elif order_response.status_code != 200:
+                    return {
+                        "success": False,
+                        "error": f"Failed to verify order existence (status {order_response.status_code})"
+                    }
 
                 # Get product info to determine perishable flag
                 product_response = await client.get(
-                    f"{settings.agent_api_base}/freshmart/products",
+                    f"{settings.agent_api_base}/freshmart/products/{product_id}",
                     timeout=10.0,
                 )
                 perishable_flag = False
                 if product_response.status_code == 200:
-                    products = product_response.json()
-                    product = next((p for p in products if p.get("product_id") == product_id), None)
-                    if product:
-                        perishable_flag = product.get("perishable", False)
+                    product = product_response.json()
+                    perishable_flag = product.get("perishable", False)
+                elif product_response.status_code == 404:
+                    return {
+                        "success": False,
+                        "error": f"Product {product_id} not found"
+                    }
+
+                # Generate a UUID-based line ID to avoid race conditions
+                line_uuid = str(uuid.uuid4())
+                line_id = f"orderline:{line_uuid}"
 
                 # Create new line item using batch endpoint
                 response = await client.post(
                     f"{settings.agent_api_base}/freshmart/orders/{order_id}/line-items/batch",
                     json={
                         "line_items": [{
+                            "line_id": line_id,
                             "product_id": product_id,
                             "quantity": quantity,
                             "unit_price": unit_price,
-                            "line_sequence": next_sequence,
                             "perishable_flag": perishable_flag,
                         }]
                     },

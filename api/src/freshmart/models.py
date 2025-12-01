@@ -137,10 +137,11 @@ class OrderLineFlat(BaseModel):
 class OrderLineCreate(BaseModel):
     """Request model for creating an order line item."""
 
+    line_id: Optional[str] = Field(None, description="Optional line ID (UUID-based). If not provided, will be auto-generated.")
     product_id: str = Field(..., description="Product ID (e.g., product:PROD-001)")
     quantity: int = Field(..., gt=0, description="Quantity ordered")
     unit_price: Decimal = Field(..., gt=0, description="Unit price at order time")
-    line_sequence: int = Field(..., gt=0, description="Display sequence within order")
+    line_sequence: Optional[int] = Field(None, gt=0, description="Optional display sequence within order")
     perishable_flag: bool = Field(..., description="Perishable flag from product")
 
 
