@@ -1,10 +1,10 @@
 # FreshMart Digital Twin Agent Starter
 
-A production-ready starter for building semantic knowledge graphs with real-time materialized views, AI agents, and full-text search.
+A production-ready starter for building semantic knowledge graphs with live materialized views, AI agents, and full-text search.
 
 ## What Is This?
 
-FreshMart demonstrates a **digital twin** of same-day grocery delivery operations powered by:
+This project demonstrates a **live digital twin** of same-day grocery delivery operations powered by:
 
 - **PostgreSQL** as a governed triple store with ontology-based validation
 - **Materialize** for real-time CQRS read models with sub-second CDC
@@ -14,11 +14,11 @@ FreshMart demonstrates a **digital twin** of same-day grocery delivery operation
 
 ## Who Is This For?
 
-- Teams building **semantic knowledge graphs** that need ACID guarantees
-- Projects requiring **real-time materialized views** over graph data
-- Organizations exploring **CQRS patterns** with ontology validation
 - Developers building **AI agents** that reason over operational data
-- Anyone wanting a **batteries-included starter** for graph-backed applications
+- Teams building minimizing time-to-confident action based on changes to **semantic knowledge graphs** 
+- Projects requiring **live materialized views** over graph data with sub-second end-to-end latency
+- Organizations exploring **CQRS patterns** with ontology validation
+
 
 ## Quick Start
 
@@ -28,10 +28,7 @@ git clone https://github.com/your-org/freshmart-digital-twin-agent-starter.git
 cd freshmart-digital-twin-agent-starter
 cp .env.example .env
 
-# Start all services (auto-initializes everything)
-make up
-
-# Or start with AI agent included
+# Start with AI agent included
 make up-agent
 ```
 
@@ -45,8 +42,8 @@ The system automatically seeds demo data: 5 stores, 15 products, 15 customers, 2
 
 ## Core Features
 
-### Real-Time Data Synchronization
-- **Sub-second CDC** from PostgreSQL to Materialize via Debezium
+### Low-latency Data Synchronization
+- **Sub-second CDC** from PostgreSQL to Materialize via replication
 - **Differential streaming** to UI clients via Zero WebSocket protocol
 - **Automatic reconciliation** across all connected interfaces
 - Changes appear in UI, search indexes, and materialized views simultaneously
@@ -61,7 +58,7 @@ The system automatically seeds demo data: 5 stores, 15 products, 15 customers, 2
 - **Write model**: PostgreSQL triple store with ontology validation
 - **Read model**: Materialize materialized views optimized per query pattern
 - **Independent scaling** of writes (PostgreSQL) and reads (Materialize)
-- **Real-time consistency** maintained via CDC with millisecond latency
+- **Strong consistency** maintained as transaction boundaries are honored
 
 ### Dynamic Pricing Engine
 - **Zone-based adjustments**: Manhattan (+15%), Brooklyn (+5%), baseline Queens
@@ -91,7 +88,7 @@ FreshMart implements **CQRS (Command Query Responsibility Segregation)** to sepa
 All data modifications flow through the PostgreSQL triple store where they are validated against the ontology schema (classes, properties, ranges, domains). This ensures semantic consistency and referential integrity at write time.
 
 **Read Path:**
-Queries use Materialize materialized views that are pre-computed, denormalized, and indexed in a three-tier architecture (ingest cluster for CDC, compute cluster for aggregation, serving cluster for indexed queries). Views update in real-time via Change Data Capture.
+Queries use Materialize materialized views that are pre-computed, denormalized, and indexed in a three-tier architecture (ingest cluster for CDC, compute cluster for aggregation, serving cluster for indexed queries). Views update via Change Data Capture.
 
 **Benefits:**
 - Write model enforces schema through ontology validation
@@ -307,19 +304,19 @@ freshmart-digital-twin-agent-starter/
 - Universal data model accommodates any entity type without schema migrations
 - Semantic relationships preserved as first-class graph edges
 - Ontology validation prevents invalid data at write time
-- Easy to reason over with AI agents using SPARQL-like queries
+- Easy to reason over with AI agents
 
 ### Why CQRS with Materialize?
 - Write model (PostgreSQL) optimized for consistency and validation
-- Read model (Materialize) optimized for query performance with indexes
-- Independent scaling: Add read replicas without impacting write throughput
-- Real-time consistency: CDC ensures views update within milliseconds
+- Read model (Materialize) can denormalize triples while applying complex business logic and send updates to downstream systems correctly
+- Handle agentic reads via auery offload: Materialize does a small amount of work as writes come in so reads on maintained objects are essentially free.
 
 ### Why OpenSearch for Agents?
 - Natural language queries require full-text search capabilities
 - Agents can search by partial matches, synonyms, and fuzzy text
 - OpenSearch provides relevance ranking for best-match results
 - Complement to structured queries over Materialize views
+- *This will ultimately support vectors for semantic search*
 
 ### Why Three-Tier Materialize Architecture?
 - **Ingest cluster**: Dedicated resources for CDC replication
@@ -327,24 +324,6 @@ freshmart-digital-twin-agent-starter/
 - **Serving cluster**: Indexed queries without impacting compute
 - Resource isolation prevents one workload from starving others
 
-## Security Considerations
-
-**DoS Protection:**
-- Order line creation limited to 100 products per request
-- Query timeouts prevent runaway queries
-- Rate limiting on API endpoints (configure via environment)
-
-**Data Validation:**
-- NULL handling with COALESCE prevents calculation failures
-- Ontology validation prevents malformed triples
-- Entity reference validation ensures referential integrity
-- Insufficient stock errors (no silent quantity modifications)
-
-**Observability:**
-- Structured logging with query execution times
-- Slow query warnings (threshold: 100ms)
-- Query statistics API at `/stats` endpoint
-- Health and readiness probes for monitoring
 
 ## License
 
