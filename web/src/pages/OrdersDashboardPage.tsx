@@ -474,14 +474,7 @@ export default function OrdersDashboardPage() {
           object_type: "entity_ref",
         },
       ];
-      if (data.order_total_amount) {
-        triples.push({
-          subject_id: orderId,
-          predicate: "order_total_amount",
-          object_value: data.order_total_amount,
-          object_type: "float",
-        });
-      }
+      // Note: order_total_amount is auto-computed by orders_flat_mv from line items, not stored in triples
       if (data.delivery_window_start) {
         triples.push({
           subject_id: orderId,

@@ -117,29 +117,64 @@ echo "Creating materialized views IN CLUSTER compute..."
 # Create materialized views in compute cluster
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW IF NOT EXISTS orders_flat_mv IN CLUSTER compute AS
+WITH order_line_amounts AS (
+    -- Extract line_amount for each orderline
+    SELECT
+        subject_id AS line_id,
+        MAX(CASE WHEN predicate = 'line_of_order' THEN object_value END) AS order_id,
+        MAX(CASE WHEN predicate = 'line_amount' THEN object_value END)::DECIMAL(10,2) AS line_amount
+    FROM triples
+    WHERE subject_id LIKE 'orderline:%'
+    GROUP BY subject_id
+),
+order_totals AS (
+    -- Aggregate line amounts per order BEFORE joining with order triples
+    SELECT
+        order_id,
+        COALESCE(SUM(line_amount), 0.00)::DECIMAL(10,2) AS computed_total
+    FROM order_line_amounts
+    GROUP BY order_id
+)
 SELECT
-    subject_id AS order_id,
-    MAX(CASE WHEN predicate = 'order_number' THEN object_value END) AS order_number,
-    MAX(CASE WHEN predicate = 'order_status' THEN object_value END) AS order_status,
-    MAX(CASE WHEN predicate = 'order_store' THEN object_value END) AS store_id,
-    MAX(CASE WHEN predicate = 'placed_by' THEN object_value END) AS customer_id,
-    MAX(CASE WHEN predicate = 'delivery_window_start' THEN object_value END) AS delivery_window_start,
-    MAX(CASE WHEN predicate = 'delivery_window_end' THEN object_value END) AS delivery_window_end,
-    MAX(CASE WHEN predicate = 'order_total_amount' THEN object_value END)::DECIMAL(10,2) AS order_total_amount,
-    MAX(updated_at) AS effective_updated_at
-FROM triples
-WHERE subject_id LIKE 'order:%'
-GROUP BY subject_id;"
+    o.subject_id AS order_id,
+    MAX(CASE WHEN o.predicate = 'order_number' THEN o.object_value END) AS order_number,
+    MAX(CASE WHEN o.predicate = 'order_status' THEN o.object_value END) AS order_status,
+    MAX(CASE WHEN o.predicate = 'order_store' THEN o.object_value END) AS store_id,
+    MAX(CASE WHEN o.predicate = 'placed_by' THEN o.object_value END) AS customer_id,
+    MAX(CASE WHEN o.predicate = 'delivery_window_start' THEN o.object_value END) AS delivery_window_start,
+    MAX(CASE WHEN o.predicate = 'delivery_window_end' THEN o.object_value END) AS delivery_window_end,
+    -- COMPUTED from line items (not from triple) - auto-calculated, always accurate
+    COALESCE(ot.computed_total, 0.00)::DECIMAL(10,2) AS order_total_amount,
+    MAX(o.updated_at) AS effective_updated_at
+FROM triples o
+LEFT JOIN order_totals ot ON ot.order_id = o.subject_id
+WHERE o.subject_id LIKE 'order:%'
+GROUP BY o.subject_id, ot.computed_total;"
 
 # Drop first to ensure schema updates are applied
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP MATERIALIZED VIEW IF EXISTS store_inventory_mv CASCADE;" 2>/dev/null
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW store_inventory_mv IN CLUSTER compute AS
+WITH order_reservations AS (
+    -- Calculate reserved quantity per product per store from pending orders
+    SELECT
+        o.store_id,
+        ol.product_id,
+        SUM(ol.quantity) AS reserved_quantity
+    FROM order_lines_flat_mv ol
+    JOIN orders_flat_mv o ON o.order_id = ol.order_id
+    WHERE o.order_status IN ('CREATED', 'PICKING', 'OUT_FOR_DELIVERY')
+    GROUP BY o.store_id, ol.product_id
+)
 SELECT
     inv.inventory_id,
     inv.store_id,
     inv.product_id,
     inv.stock_level,
+    -- NEW: Reserved quantity from pending orders
+    COALESCE(res.reserved_quantity, 0)::INT AS reserved_quantity,
+    -- NEW: Available quantity (stock minus reservations)
+    GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0)::INT AS available_quantity,
     inv.replenishment_eta,
     inv.effective_updated_at,
     -- Product details
@@ -152,13 +187,14 @@ SELECT
     s.store_name,
     s.store_zone,
     s.store_address,
-    -- Availability flags
+    -- Availability flags (based on AVAILABLE quantity, not total stock)
     CASE
-        WHEN inv.stock_level > 10 THEN 'IN_STOCK'
-        WHEN inv.stock_level > 0 THEN 'LOW_STOCK'
+        WHEN GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 10 THEN 'IN_STOCK'
+        WHEN GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 0 THEN 'LOW_STOCK'
         ELSE 'OUT_OF_STOCK'
     END AS availability_status,
-    (inv.stock_level <= 10 AND inv.stock_level > 0) AS low_stock
+    (GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) <= 10
+     AND GREATEST(inv.stock_level - COALESCE(res.reserved_quantity, 0), 0) > 0) AS low_stock
 FROM (
     SELECT
         subject_id AS inventory_id,
@@ -171,6 +207,7 @@ FROM (
     WHERE subject_id LIKE 'inventory:%'
     GROUP BY subject_id
 ) inv
+LEFT JOIN order_reservations res ON res.store_id = inv.store_id AND res.product_id = inv.product_id
 LEFT JOIN products_flat p ON p.product_id = inv.product_id
 LEFT JOIN stores_flat s ON s.store_id = inv.store_id;"
 
