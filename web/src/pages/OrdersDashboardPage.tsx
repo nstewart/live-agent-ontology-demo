@@ -293,7 +293,7 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
               <div className="flex items-center justify-end gap-1">
                 <span>Live Price</span>
-                <InfoTooltip text="Current dynamically-calculated price based on zone, perishability, stock levels, popularity, scarcity, and demand factors" />
+                <InfoTooltip text="Current dynamically-calculated price. Formula: Base Price × Zone Adjustment × Perishable Adjustment × Local Stock Adjustment (affected by pending orders) × Popularity Adjustment (delivered orders) × Scarcity Adjustment (delivered orders) × Demand Multiplier (delivered orders) × Demand Premium (delivered orders)" />
               </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
