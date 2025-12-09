@@ -26,6 +26,7 @@ import {
   Snowflake,
   Filter,
   X,
+  Info,
 } from "lucide-react";
 import {
   OrderFormModal,
@@ -63,6 +64,26 @@ function StatusBadge({ status }: { status?: string | null }) {
       <Icon className="h-3 w-3" />
       {status || "Unknown"}
     </span>
+  );
+}
+
+function InfoTooltip({ text }: { text: string }) {
+  const [isVisible, setIsVisible] = useState(false);
+
+  return (
+    <div className="relative inline-block">
+      <Info
+        className="h-3.5 w-3.5 text-gray-400 cursor-help"
+        onMouseEnter={() => setIsVisible(true)}
+        onMouseLeave={() => setIsVisible(false)}
+      />
+      {isVisible && (
+        <div className="absolute z-50 w-64 p-2 text-xs text-white bg-gray-900 rounded shadow-lg -top-2 right-0 transform translate-x-full ml-2">
+          <div className="absolute left-0 top-3 transform -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+          {text}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -258,13 +279,22 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
               Quantity
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Order Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Order Price</span>
+                <InfoTooltip text="Price locked in when the order was placed - what the customer was charged for this item" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Base Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Base Price</span>
+                <InfoTooltip text="Product's static catalog price - no dynamic adjustments applied" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Live Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Live Price</span>
+                <InfoTooltip text="Current dynamically-calculated price based on zone, perishability, stock levels, popularity, scarcity, and demand factors" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
               Line Total
