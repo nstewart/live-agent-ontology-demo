@@ -174,6 +174,8 @@ class TripleService:
 
     async def create_triples_batch(self, triples: list[TripleCreate]) -> list[Triple]:
         """Create multiple triples in a batch."""
+        logger.info(f"🔵 [TRANSACTION START] Creating {len(triples)} new triples")
+
         # Log transaction start with summary of what's being written
         subjects = {}  # subject_id -> list of predicates
         for triple in triples:
@@ -255,9 +257,9 @@ class TripleService:
             for row in rows
         ]
 
-        logger.info(
-            f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
-        )
+        # logger.info(
+        #     f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
+        # )
 
         return created
 
@@ -277,6 +279,8 @@ class TripleService:
             prefix = triple.subject_id.split(":", 1)[0]
             if not prefix:
                 raise ValueError(f"Invalid subject_id format: '{triple.subject_id}'. Prefix cannot be empty")
+
+        logger.info(f"🔵 [TRANSACTION START] Upserting {len(triples)} triples")
 
         # Log transaction start
         subjects = {}
@@ -379,9 +383,9 @@ class TripleService:
             for row in rows
         ]
 
-        logger.info(
-            f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
-        )
+        # logger.info(
+        #     f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
+        # )
 
         return upserted
 
@@ -453,9 +457,9 @@ class TripleService:
         }
         likely_index = index_map.get(prefix, prefix)
 
-        logger.info(
-            f"✅ PG_TXN_END: Successfully updated 1 triple → will update {likely_index} index for {triple.subject_id}"
-        )
+        # logger.info(
+        #     f"✅ PG_TXN_END: Successfully updated 1 triple → will update {likely_index} index for {triple.subject_id}"
+        # )
 
         return triple
 

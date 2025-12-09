@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   freshmartApi,
   triplesApi,
-  OrderFlat,
   TripleCreate,
 } from "../api/client";
 import { useZero, useQuery } from "@rocicorp/zero/react";
@@ -26,6 +25,7 @@ import {
   Snowflake,
   Filter,
   X,
+  Info,
 } from "lucide-react";
 import {
   OrderFormModal,
@@ -63,6 +63,26 @@ function StatusBadge({ status }: { status?: string | null }) {
       <Icon className="h-3 w-3" />
       {status || "Unknown"}
     </span>
+  );
+}
+
+function InfoTooltip({ text }: { text: string }) {
+  const [isVisible, setIsVisible] = useState(false);
+
+  return (
+    <div className="relative inline-block">
+      <Info
+        className="h-3.5 w-3.5 text-gray-400 cursor-help"
+        onMouseEnter={() => setIsVisible(true)}
+        onMouseLeave={() => setIsVisible(false)}
+      />
+      {isVisible && (
+        <div className="absolute z-50 w-64 p-2 text-xs text-white bg-gray-900 rounded shadow-lg -top-2 right-0 transform translate-x-full ml-2">
+          <div className="absolute left-0 top-3 transform -translate-x-1 w-2 h-2 bg-gray-900 rotate-45" />
+          {text}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -258,13 +278,22 @@ function LineItemsTable({ lineItems }: { lineItems: OrderLineItem[] }) {
               Quantity
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Order Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Order Price</span>
+                <InfoTooltip text="Price locked in when the order was placed - what the customer was charged for this item" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Base Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Base Price</span>
+                <InfoTooltip text="Product's static catalog price - no dynamic adjustments applied" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
-              Live Price
+              <div className="flex items-center justify-end gap-1">
+                <span>Live Price</span>
+                <InfoTooltip text="Current dynamically-calculated price. Formula: Base Price × Zone Adjustment × Perishable Adjustment × Local Stock Adjustment (affected by pending orders) × Popularity Adjustment (delivered orders) × Scarcity Adjustment (delivered orders) × Demand Multiplier (delivered orders) × Demand Premium (delivered orders)" />
+              </div>
             </th>
             <th className="text-right px-3 py-2 text-xs font-medium text-gray-600">
               Line Total
@@ -557,42 +586,77 @@ export default function OrdersDashboardPage() {
     },
   });
 
+  // Helper function to check if line items have changed
+  const hasLineItemsChanged = (
+    originalItems: OrderLineItem[] | undefined,
+    newItems: CartLineItem[]
+  ): boolean => {
+    if (!originalItems && newItems.length === 0) return false;
+    if (!originalItems || originalItems.length !== newItems.length) return true;
+
+    // Compare each line item
+    for (let i = 0; i < originalItems.length; i++) {
+      const original = originalItems[i];
+      const newItem = newItems[i];
+
+      if (
+        original.product_id !== newItem.product_id ||
+        original.quantity !== newItem.quantity ||
+        Number(original.unit_price) !== Number(newItem.unit_price) ||
+        original.perishable_flag !== newItem.perishable_flag
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   const updateMutation = useMutation({
     mutationFn: async ({
       order,
       data,
       lineItems,
     }: {
-      order: OrderFlat;
+      order: OrderWithLines;
       data: OrderFormData;
       lineItems: CartLineItem[];
     }) => {
-      // Build line items for atomic update
-      const lineItemsToCreate = lineItems.map((item, index) => ({
-        product_id: item.product_id,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        line_sequence: index + 1,
-        perishable_flag: item.perishable_flag,
-      }));
-
-      // Only send changed order fields (avoid unnecessary triple updates)
       const normalizeDate = (date: string | undefined | null) =>
         date ? new Date(date).toISOString() : undefined;
 
-      await freshmartApi.atomicUpdateOrder(order.order_id, {
-        // Only include fields that changed
-        order_status: data.order_status !== order.order_status ? data.order_status : undefined,
-        customer_id: data.customer_id !== order.customer_id ? data.customer_id : undefined,
-        store_id: data.store_id !== order.store_id ? data.store_id : undefined,
-        delivery_window_start: normalizeDate(data.delivery_window_start) !== normalizeDate(order.delivery_window_start)
-          ? normalizeDate(data.delivery_window_start)
-          : undefined,
-        delivery_window_end: normalizeDate(data.delivery_window_end) !== normalizeDate(order.delivery_window_end)
-          ? normalizeDate(data.delivery_window_end)
-          : undefined,
-        line_items: lineItemsToCreate,
-      });
+      // Build update payload (only include changed fields)
+      const updateData: any = {};
+
+      if (data.order_status !== order.order_status) {
+        updateData.order_status = data.order_status;
+      }
+      if (data.customer_id !== order.customer_id) {
+        updateData.customer_id = data.customer_id;
+      }
+      if (data.store_id !== order.store_id) {
+        updateData.store_id = data.store_id;
+      }
+      if (normalizeDate(data.delivery_window_start) !== normalizeDate(order.delivery_window_start)) {
+        updateData.delivery_window_start = normalizeDate(data.delivery_window_start);
+      }
+      if (normalizeDate(data.delivery_window_end) !== normalizeDate(order.delivery_window_end)) {
+        updateData.delivery_window_end = normalizeDate(data.delivery_window_end);
+      }
+
+      // Only include line items if they actually changed
+      if (hasLineItemsChanged(order.line_items, lineItems)) {
+        updateData.line_items = lineItems.map((item, index) => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          line_sequence: index + 1,
+          perishable_flag: item.perishable_flag,
+        }));
+      }
+
+      // Use PATCH for smart updates (only writes what changed)
+      await freshmartApi.updateOrderFields(order.order_id, updateData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
