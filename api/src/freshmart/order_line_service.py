@@ -507,7 +507,7 @@ class OrderLineService:
         Raises:
             ValueError: If order not found or validation fails
         """
-        logger.info(f"🔵 [ATOMIC UPDATE] Starting atomic update for {order_id} with {len(line_items) if line_items else 0} line items")
+        logger.info(f"🔵 [TRANSACTION START] Starting atomic update for {order_id} with {len(line_items) if line_items else 0} line items")
 
         # Build order field triples to upsert
         order_triples: list[TripleCreate] = []
@@ -577,7 +577,7 @@ class OrderLineService:
             logger.info(f"  [STEP 3/3] Creating {len(line_items)} new line item(s)")
             await self.create_line_items_batch(order_id, line_items)
 
-        logger.info(f"✅ [ATOMIC UPDATE] Completed atomic update for {order_id} (awaiting transaction commit)")
+        # logger.info(f"✅ [ATOMIC UPDATE] Completed atomic update for {order_id} (awaiting transaction commit)")
 
         # Note: order_total_amount will be auto-calculated by the materialized view
         # based on the new line items

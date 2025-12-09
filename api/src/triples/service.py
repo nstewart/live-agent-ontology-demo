@@ -255,9 +255,9 @@ class TripleService:
             for row in rows
         ]
 
-        logger.info(
-            f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
-        )
+        # logger.info(
+        #     f"  ✅ [BATCH INSERT] Successfully wrote {len(created)} triples"
+        # )
 
         return created
 
@@ -379,9 +379,9 @@ class TripleService:
             for row in rows
         ]
 
-        logger.info(
-            f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
-        )
+        # logger.info(
+        #     f"  ✅ [BATCH UPSERT] Successfully upserted {len(upserted)} triples"
+        # )
 
         return upserted
 
@@ -453,9 +453,9 @@ class TripleService:
         }
         likely_index = index_map.get(prefix, prefix)
 
-        logger.info(
-            f"✅ PG_TXN_END: Successfully updated 1 triple → will update {likely_index} index for {triple.subject_id}"
-        )
+        # logger.info(
+        #     f"✅ PG_TXN_END: Successfully updated 1 triple → will update {likely_index} index for {triple.subject_id}"
+        # )
 
         return triple
 
