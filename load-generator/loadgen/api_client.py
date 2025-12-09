@@ -265,7 +265,7 @@ class FreshMartAPIClient:
             },
             {
                 "subject_id": customer_id,
-                "predicate": "customer_home_store",
+                "predicate": "home_store",
                 "object_value": home_store_id,
                 "object_type": "entity_ref",
             },

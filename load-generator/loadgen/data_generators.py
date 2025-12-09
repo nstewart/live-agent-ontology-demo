@@ -28,17 +28,18 @@ class DataGenerator:
         """Generate a unique customer ID.
 
         Returns:
-            Customer ID in format "customer:XXXXX"
+            Customer ID in format "customer:UUID"
         """
-        return f"customer:{random.randint(10000, 99999)}"
+        return f"customer:{uuid.uuid4()}"
 
     def generate_order_id(self) -> str:
         """Generate a unique order ID.
 
         Returns:
-            Order ID in format "order:FM-XXXXX"
+            Order ID in format "order:FM-UUID"
         """
-        return f"order:FM-{random.randint(100000, 999999)}"
+        # Use first 8 chars of UUID for readability while maintaining uniqueness
+        return f"order:FM-{str(uuid.uuid4())[:8]}"
 
     def generate_customer_name(self) -> str:
         """Generate a realistic customer name.
