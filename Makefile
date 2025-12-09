@@ -102,6 +102,9 @@ up-agent:
 	@$(MAKE) migrate
 	@echo "Initializing Materialize views..."
 	@$(MAKE) init-mz
+	@echo "Restarting Zero services to refresh subscriptions..."
+	@docker-compose restart materialize-zero zero-cache
+	@sleep 3
 	@echo "Loading seed data..."
 	@$(MAKE) seed
 	@echo ""
