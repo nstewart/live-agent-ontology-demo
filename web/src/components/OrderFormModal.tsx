@@ -102,7 +102,8 @@ export function OrderFormModal({
           quantity: quantity,
           unit_price: unitPrice,
           perishable_flag: item.perishable_flag || false,
-          available_stock: item.current_stock_level ?? 999, // Use actual stock level or fallback
+          // For editing: add back current quantity since available_quantity already deducted it
+          available_stock: (item.current_stock_level ?? 0) + quantity,
           category: item.category || undefined,
           line_amount: lineAmount,
         };
