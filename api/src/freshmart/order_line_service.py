@@ -33,6 +33,19 @@ class OrderLineService:
         line_uuid = str(uuid.uuid4())
         return f"orderline:{line_uuid}"
 
+    def _normalize_decimal(self, value) -> Optional[str]:
+        """Normalize a numeric value to a consistent string representation.
+
+        Args:
+            value: Numeric value (int, float, Decimal, or string)
+
+        Returns:
+            Normalized string representation or None if value is None
+        """
+        if value is None:
+            return None
+        return str(Decimal(str(value)))
+
     async def _fetch_live_prices(
         self, store_id: str, product_ids: list[str]
     ) -> dict[str, Decimal]:
@@ -507,7 +520,7 @@ class OrderLineService:
         Raises:
             ValueError: If order not found or validation fails
         """
-        logger.info(f"🔵 [ATOMIC UPDATE] Starting atomic update for {order_id} with {len(line_items) if line_items else 0} line items")
+        logger.info(f"🔵 [TRANSACTION START] Starting atomic update for {order_id} with {len(line_items) if line_items else 0} line items")
 
         # Build order field triples to upsert
         order_triples: list[TripleCreate] = []
@@ -577,9 +590,274 @@ class OrderLineService:
             logger.info(f"  [STEP 3/3] Creating {len(line_items)} new line item(s)")
             await self.create_line_items_batch(order_id, line_items)
 
-        logger.info(f"✅ [ATOMIC UPDATE] Completed atomic update for {order_id} (awaiting transaction commit)")
+        # logger.info(f"✅ [ATOMIC UPDATE] Completed atomic update for {order_id} (awaiting transaction commit)")
 
         # Note: order_total_amount will be auto-calculated by the materialized view
         # based on the new line items
 
         return None  # Could return updated order if needed
+
+    async def update_order_fields(
+        self,
+        order_id: str,
+        order_status: Optional[str] = None,
+        customer_id: Optional[str] = None,
+        store_id: Optional[str] = None,
+        delivery_window_start: Optional[str] = None,
+        delivery_window_end: Optional[str] = None,
+        line_items: Optional[list[OrderLineCreate]] = None,
+    ) -> None:
+        """Update order fields and optionally patch line items.
+
+        This method only updates what changed:
+        - Order fields: only upsert provided fields
+        - Line items (if provided): smart patch - only update/add/delete what changed
+
+        Args:
+            order_id: Order ID to update
+            order_status: New order status (optional)
+            customer_id: New customer ID (optional)
+            store_id: New store ID (optional)
+            delivery_window_start: New delivery window start (optional)
+            delivery_window_end: New delivery window end (optional)
+            line_items: New line items to patch (optional). If provided, will smart-patch.
+
+        Raises:
+            ValueError: If order not found
+        """
+        # Validate order exists
+        order_check = await self.session.execute(
+            text("SELECT 1 FROM triples WHERE subject_id = :order_id LIMIT 1"),
+            {"order_id": order_id}
+        )
+        if not order_check.fetchone():
+            raise ValueError(f"Order {order_id} not found")
+
+        # Validate line sequence uniqueness if provided
+        if line_items is not None:
+            sequences = [item.line_sequence for item in line_items]
+            if len(sequences) != len(set(sequences)):
+                raise ValueError("line_sequence values must be unique")
+            if any(seq < 1 for seq in sequences):
+                raise ValueError("line_sequence must be positive")
+
+        field_count = sum([
+            order_status is not None,
+            customer_id is not None,
+            store_id is not None,
+            delivery_window_start is not None,
+            delivery_window_end is not None,
+        ])
+        line_item_count = len(line_items) if line_items is not None else 0
+        logger.info(
+            f"🔵 [TRANSACTION START] Patching {order_id}: "
+            f"{field_count} field(s), {line_item_count} line item(s)"
+        )
+
+        order_triples = []
+
+        # Build list of triples to upsert (only for provided fields)
+        if order_status is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="order_status",
+                    object_value=order_status,
+                    object_type="string",
+                )
+            )
+
+        if customer_id is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="placed_by",
+                    object_value=customer_id,
+                    object_type="entity_ref",
+                )
+            )
+
+        if store_id is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="order_store",
+                    object_value=store_id,
+                    object_type="entity_ref",
+                )
+            )
+
+        if delivery_window_start is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="delivery_window_start",
+                    object_value=delivery_window_start,
+                    object_type="timestamp",
+                )
+            )
+
+        if delivery_window_end is not None:
+            order_triples.append(
+                TripleCreate(
+                    subject_id=order_id,
+                    predicate="delivery_window_end",
+                    object_value=delivery_window_end,
+                    object_type="timestamp",
+                )
+            )
+
+        # Only upsert if there are fields to update
+        if order_triples:
+            logger.info(f"📝 [PARTIAL UPDATE] Updating {len(order_triples)} order field(s) for {order_id}")
+            await self.triple_service.upsert_triples_batch(order_triples)
+
+        # Smart line item patching (if provided)
+        if line_items is not None:
+            # Get existing line items
+            existing_lines_result = await self.session.execute(
+                text("""
+                    SELECT DISTINCT subject_id
+                    FROM triples
+                    WHERE predicate = 'line_of_order' AND object_value = :order_id
+                """),
+                {"order_id": order_id},
+            )
+            existing_line_ids = {row.subject_id for row in existing_lines_result.fetchall()}
+
+            # Get existing line item details (line_sequence -> line_id mapping)
+            existing_items_map = {}
+            if existing_line_ids:
+                # Batch fetch all line sequence numbers in a single query
+                existing_items_result = await self.session.execute(
+                    text("""
+                        SELECT subject_id, object_value
+                        FROM triples
+                        WHERE subject_id = ANY(:line_ids) AND predicate = 'line_sequence'
+                    """),
+                    {"line_ids": list(existing_line_ids)},
+                )
+                existing_items_map = {
+                    int(row.object_value): row.subject_id
+                    for row in existing_items_result.fetchall()
+                }
+
+            # Batch fetch all existing values for all line items in a single query
+            existing_vals_by_line = {}
+            if existing_line_ids:
+                existing_vals_result = await self.session.execute(
+                    text("""
+                        SELECT subject_id, predicate, object_value
+                        FROM triples
+                        WHERE subject_id = ANY(:line_ids)
+                    """),
+                    {"line_ids": list(existing_line_ids)},
+                )
+                for row in existing_vals_result.fetchall():
+                    if row.subject_id not in existing_vals_by_line:
+                        existing_vals_by_line[row.subject_id] = {}
+                    existing_vals_by_line[row.subject_id][row.predicate] = row.object_value
+
+            # Track which line items to keep
+            line_ids_to_keep = set()
+
+            # Process each new line item
+            for new_item in line_items:
+                line_sequence = new_item.line_sequence
+                existing_line_id = existing_items_map.get(line_sequence)
+
+                if existing_line_id:
+                    # Line item exists at this sequence - check if it changed
+                    line_ids_to_keep.add(existing_line_id)
+
+                    # Get existing values from our batch-fetched data
+                    existing_vals = existing_vals_by_line.get(existing_line_id, {})
+
+                    # Build triples for changed fields only
+                    line_amount = Decimal(str(new_item.quantity)) * Decimal(str(new_item.unit_price))
+                    changed_triples = []
+
+                    if existing_vals.get("line_product") != new_item.product_id:
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="line_product",
+                            object_value=new_item.product_id,
+                            object_type="entity_ref",
+                        ))
+
+                    # Use normalized decimal comparison for numeric fields
+                    if self._normalize_decimal(existing_vals.get("quantity")) != self._normalize_decimal(new_item.quantity):
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="quantity",
+                            object_value=str(new_item.quantity),
+                            object_type="int",
+                        ))
+
+                    if self._normalize_decimal(existing_vals.get("order_line_unit_price")) != self._normalize_decimal(new_item.unit_price):
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="order_line_unit_price",
+                            object_value=str(new_item.unit_price),
+                            object_type="float",
+                        ))
+
+                    if self._normalize_decimal(existing_vals.get("line_amount")) != self._normalize_decimal(line_amount):
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="line_amount",
+                            object_value=str(line_amount),
+                            object_type="float",
+                        ))
+
+                    if existing_vals.get("perishable_flag") != str(new_item.perishable_flag).lower():
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="perishable_flag",
+                            object_value=str(new_item.perishable_flag).lower(),
+                            object_type="bool",
+                        ))
+
+                    if self._normalize_decimal(existing_vals.get("line_sequence")) != self._normalize_decimal(line_sequence):
+                        changed_triples.append(TripleCreate(
+                            subject_id=existing_line_id,
+                            predicate="line_sequence",
+                            object_value=str(line_sequence),
+                            object_type="int",
+                        ))
+
+                    # Only update if something actually changed
+                    if changed_triples:
+                        logger.info(f"  📝 Updating {len(changed_triples)} triple(s) for line item seq={line_sequence}")
+                        await self.triple_service.upsert_triples_batch(changed_triples)
+
+                else:
+                    # New line item - create it
+                    line_id = self._generate_line_id()
+                    line_ids_to_keep.add(line_id)
+                    logger.info(f"  ➕ Creating new line item seq={line_sequence}")
+                    await self._create_single_line_item(order_id, line_id, new_item)
+
+            # Delete line items that are no longer in the new list
+            line_ids_to_delete = existing_line_ids - line_ids_to_keep
+            if line_ids_to_delete:
+                logger.info(f"  🗑️  Deleting {len(line_ids_to_delete)} line item(s)")
+                await self.session.execute(
+                    text("DELETE FROM triples WHERE subject_id = ANY(:line_ids)"),
+                    {"line_ids": list(line_ids_to_delete)},
+                )
+
+        return None
+
+    async def _create_single_line_item(
+        self, order_id: str, line_id: str, line_item: OrderLineCreate
+    ) -> None:
+        """Helper to create a single line item.
+
+        Args:
+            order_id: Parent order ID
+            line_id: Generated line item ID
+            line_item: Line item data
+        """
+        triples = self._create_line_item_triples(line_id, order_id, line_item)
+        await self.triple_service.create_triples_batch(triples)

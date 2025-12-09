@@ -169,6 +169,20 @@ class OrderWithLinesFlat(OrderFlat):
     total_weight_kg: Optional[Decimal] = Field(None, description="Total weight in kg")
 
 
+class OrderFieldsUpdate(BaseModel):
+    """Partial update for order fields and optional smart line item patching."""
+
+    order_status: Optional[str] = Field(None, description="Order status")
+    customer_id: Optional[str] = Field(None, description="Customer ID")
+    store_id: Optional[str] = Field(None, description="Store ID")
+    delivery_window_start: Optional[str] = Field(None, description="Delivery window start (ISO 8601)")
+    delivery_window_end: Optional[str] = Field(None, description="Delivery window end (ISO 8601)")
+    line_items: Optional[list[OrderLineCreate]] = Field(
+        None,
+        description="Line items to smart-patch (only updates/adds/deletes what changed)",
+    )
+
+
 class OrderAtomicUpdate(BaseModel):
     """Atomic update for order fields and line items in a single transaction."""
 
