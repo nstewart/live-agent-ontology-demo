@@ -786,7 +786,9 @@ class OrderLineService:
                         ))
 
                     # Use normalized decimal comparison for numeric fields
-                    if self._normalize_decimal(existing_vals.get("quantity")) != self._normalize_decimal(new_item.quantity):
+                    existing_qty = self._normalize_decimal(existing_vals.get("quantity"))
+                    new_qty = self._normalize_decimal(new_item.quantity)
+                    if existing_qty != new_qty:
                         changed_triples.append(TripleCreate(
                             subject_id=existing_line_id,
                             predicate="quantity",
