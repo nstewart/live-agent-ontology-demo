@@ -13,6 +13,7 @@ from src.freshmart.models import (
     CourierSchedule,
     CustomerInfo,
     OrderAtomicUpdate,
+    OrderFieldsUpdate,
     OrderFilter,
     OrderFlat,
     OrderLineBatchCreate,
@@ -173,6 +174,60 @@ async def atomic_update_order(
     """
     try:
         await service.atomic_update_order_with_lines(
+            order_id=order_id,
+            order_status=data.order_status,
+            customer_id=data.customer_id,
+            store_id=data.store_id,
+            delivery_window_start=data.delivery_window_start,
+            delivery_window_end=data.delivery_window_end,
+            line_items=data.line_items,
+        )
+        return {"success": True, "order_id": order_id}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except TripleValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Triple validation failed",
+                "errors": [err.model_dump() for err in e.validation_result.errors],
+            },
+        )
+
+
+@router.patch("/orders/{order_id:path}", status_code=status.HTTP_200_OK)
+async def update_order_fields(
+    order_id: str,
+    data: OrderFieldsUpdate,
+    service: OrderLineService = Depends(get_order_line_service),
+):
+    """
+    Smart-patch order fields and line items.
+
+    This endpoint only updates what changed:
+    - Order fields: only upserts provided fields
+    - Line items: smart patch (only updates/adds/deletes what changed)
+
+    **No unnecessary triple writes!**
+
+    Examples:
+    ```json
+    // Update just status - writes 1 triple
+    {
+      "order_status": "PICKING"
+    }
+
+    // Update status + line items - only writes changed triples
+    {
+      "order_status": "PICKING",
+      "line_items": [...]
+    }
+    ```
+
+    Contrast with `/atomic` which always deletes and recreates all line items.
+    """
+    try:
+        await service.update_order_fields(
             order_id=order_id,
             order_status=data.order_status,
             customer_id=data.customer_id,

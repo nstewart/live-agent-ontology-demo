@@ -3,7 +3,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   freshmartApi,
   triplesApi,
-  OrderFlat,
   TripleCreate,
 } from "../api/client";
 import { useZero, useQuery } from "@rocicorp/zero/react";
@@ -593,12 +592,34 @@ export default function OrdersDashboardPage() {
       data,
       lineItems,
     }: {
-      order: OrderFlat;
+      order: OrderWithLines;
       data: OrderFormData;
       lineItems: CartLineItem[];
     }) => {
-      // Build line items for atomic update
-      const lineItemsToCreate = lineItems.map((item, index) => ({
+      const normalizeDate = (date: string | undefined | null) =>
+        date ? new Date(date).toISOString() : undefined;
+
+      // Build update payload (only include changed fields)
+      const updateData: any = {};
+
+      if (data.order_status !== order.order_status) {
+        updateData.order_status = data.order_status;
+      }
+      if (data.customer_id !== order.customer_id) {
+        updateData.customer_id = data.customer_id;
+      }
+      if (data.store_id !== order.store_id) {
+        updateData.store_id = data.store_id;
+      }
+      if (normalizeDate(data.delivery_window_start) !== normalizeDate(order.delivery_window_start)) {
+        updateData.delivery_window_start = normalizeDate(data.delivery_window_start);
+      }
+      if (normalizeDate(data.delivery_window_end) !== normalizeDate(order.delivery_window_end)) {
+        updateData.delivery_window_end = normalizeDate(data.delivery_window_end);
+      }
+
+      // Always include line items - backend will smart-patch them
+      updateData.line_items = lineItems.map((item, index) => ({
         product_id: item.product_id,
         quantity: item.quantity,
         unit_price: item.unit_price,
@@ -606,23 +627,8 @@ export default function OrdersDashboardPage() {
         perishable_flag: item.perishable_flag,
       }));
 
-      // Only send changed order fields (avoid unnecessary triple updates)
-      const normalizeDate = (date: string | undefined | null) =>
-        date ? new Date(date).toISOString() : undefined;
-
-      await freshmartApi.atomicUpdateOrder(order.order_id, {
-        // Only include fields that changed
-        order_status: data.order_status !== order.order_status ? data.order_status : undefined,
-        customer_id: data.customer_id !== order.customer_id ? data.customer_id : undefined,
-        store_id: data.store_id !== order.store_id ? data.store_id : undefined,
-        delivery_window_start: normalizeDate(data.delivery_window_start) !== normalizeDate(order.delivery_window_start)
-          ? normalizeDate(data.delivery_window_start)
-          : undefined,
-        delivery_window_end: normalizeDate(data.delivery_window_end) !== normalizeDate(order.delivery_window_end)
-          ? normalizeDate(data.delivery_window_end)
-          : undefined,
-        line_items: lineItemsToCreate,
-      });
+      // Use PATCH for smart updates (only writes what changed)
+      await freshmartApi.updateOrderFields(order.order_id, updateData);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
