@@ -409,20 +409,25 @@ export default function OrdersDashboardPage() {
   const [storesData] = useQuery(z.query.stores_mv.orderBy("store_name", "asc"));
 
   // Build filtered query with related data (joins orders_with_lines_mv with orders_search_source_mv)
-  let ordersQuery = z.query.orders_with_lines_mv.related("searchData");
+  // Memoize the query to prevent unnecessary re-subscriptions
+  const ordersQuery = useMemo(() => {
+    let query = z.query.orders_with_lines_mv.related("searchData");
 
-  if (statusFilter) {
-    ordersQuery = ordersQuery.where("order_status", "=", statusFilter);
-  }
-  if (storeFilter) {
-    ordersQuery = ordersQuery.where("store_id", "=", storeFilter);
-  }
-  if (searchQuery.trim()) {
-    const pattern = `%${searchQuery.trim()}%`;
-    ordersQuery = ordersQuery.where("order_number", "ILIKE", pattern);
-  }
+    if (statusFilter) {
+      query = query.where("order_status", "=", statusFilter);
+    }
+    if (storeFilter) {
+      query = query.where("store_id", "=", storeFilter);
+    }
+    if (searchQuery.trim()) {
+      const pattern = `%${searchQuery.trim()}%`;
+      query = query.where("order_number", "ILIKE", pattern);
+    }
 
-  const [ordersData] = useQuery(ordersQuery.orderBy("order_number", "asc"));
+    return query.orderBy("order_number", "asc");
+  }, [z, statusFilter, storeFilter, searchQuery]);
+
+  const [ordersData] = useQuery(ordersQuery);
 
   // Map to OrderWithLines type, pulling names from the related searchData
   const orders: OrderWithLines[] = useMemo(
