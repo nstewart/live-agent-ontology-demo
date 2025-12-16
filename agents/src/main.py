@@ -210,7 +210,14 @@ def serve(
                         self.wfile.write(json.dumps({"error": "message required"}).encode())
                         return
 
-                    response = asyncio.run(run_assistant(message, thread_id=thread_id))
+                    # Handle the new generator pattern from run_assistant
+                    async def get_response():
+                        async for event_type, data in run_assistant(message, thread_id=thread_id, stream_events=False):
+                            if event_type == "response":
+                                return data
+                        return "I couldn't complete that request."
+
+                    response = asyncio.run(get_response())
                     self.send_response(200)
                     self.send_header("Content-type", "application/json")
                     self.end_headers()
