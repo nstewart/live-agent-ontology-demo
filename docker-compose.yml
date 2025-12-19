@@ -259,6 +259,11 @@ services:
       dockerfile: Dockerfile
     environment:
       - AGENT_API_BASE=http://api:8080
+      - PG_HOST=${PG_HOST:-db}
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-postgres}
+      - PG_PASSWORD=${PG_PASSWORD:-postgres}
+      - PG_DATABASE=${PG_DATABASE:-freshmart}
       - MZ_HOST=${MZ_HOST:-mz}
       - MZ_PORT=6875
       - MZ_USER=${MZ_USER:-materialize}
@@ -271,8 +276,12 @@ services:
     ports:
       - "${AGENT_PORT:-8081}:8081"
     depends_on:
-      - api
-      - opensearch
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
     profiles:
       - agent
     volumes:
