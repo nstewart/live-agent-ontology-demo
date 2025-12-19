@@ -7,6 +7,7 @@ import {
   Truck,
   Settings,
   Network,
+  TrendingUp,
 } from 'lucide-react'
 
 import OntologyClassesPage from './pages/OntologyClassesPage'
@@ -16,9 +17,11 @@ import OrdersDashboardPage from './pages/OrdersDashboardPage'
 import StoresInventoryPage from './pages/StoresInventoryPage'
 import CouriersSchedulePage from './pages/CouriersSchedulePage'
 import SettingsPage from './pages/SettingsPage'
+import MetricsDashboardPage from './pages/MetricsDashboardPage'
 
 const navItems = [
   { path: '/', icon: ShoppingCart, label: 'Orders' },
+  { path: '/metrics', icon: TrendingUp, label: 'CEO Metrics' },
   { path: '/stores', icon: Warehouse, label: 'Stores & Inventory' },
   { path: '/couriers', icon: Truck, label: 'Couriers' },
   { path: '/ontology/classes', icon: Database, label: 'Ontology Classes' },
@@ -61,6 +64,7 @@ function App() {
         <main className="flex-1 overflow-auto">
           <Routes>
             <Route path="/" element={<OrdersDashboardPage />} />
+            <Route path="/metrics" element={<MetricsDashboardPage />} />
             <Route path="/stores" element={<StoresInventoryPage />} />
             <Route path="/couriers" element={<CouriersSchedulePage />} />
             <Route path="/ontology/classes" element={<OntologyClassesPage />} />
