@@ -810,12 +810,16 @@ echo "Creating indexes for CEO metrics..."
 
 # Pricing yield indexes
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS pricing_yield_zone_idx IN CLUSTER serving ON pricing_yield_mv (store_zone, category);"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS pricing_yield_store_idx IN CLUSTER serving ON pricing_yield_mv (store_id);"
 
 # Inventory risk indexes
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS inventory_risk_level_idx IN CLUSTER serving ON inventory_risk_mv (risk_level, store_zone);"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS inventory_risk_store_idx IN CLUSTER serving ON inventory_risk_mv (store_id);"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS inventory_risk_category_idx IN CLUSTER serving ON inventory_risk_mv (category);"
 
 # Store capacity health indexes
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_capacity_health_idx IN CLUSTER serving ON store_capacity_health_mv (health_status, store_zone);"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_capacity_store_idx IN CLUSTER serving ON store_capacity_health_mv (store_id);"
 
 echo "Verifying three-tier setup..."
 echo ""
