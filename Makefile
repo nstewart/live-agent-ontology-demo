@@ -198,7 +198,7 @@ health:
 	@curl -s http://localhost:$${OS_PORT:-9200}/_cluster/health | jq . || echo "OpenSearch: Not responding"
 
 # Load Generation
-# Check for uv installation and set up venv
+# Check for uv installation and set up environment
 setup-load-gen:
 	@if ! command -v uv &> /dev/null; then \
 		echo "Error: 'uv' is not installed."; \
@@ -211,33 +211,31 @@ setup-load-gen:
 		echo "For more info: https://github.com/astral-sh/uv"; \
 		exit 1; \
 	fi
-	@cd load-generator && if [ ! -d .venv ]; then \
-		echo "Creating virtual environment..."; \
-		uv venv; \
-	fi
-	@cd load-generator && uv pip install -q -r requirements.txt
+	@echo "Setting up load generator (uv will install Python if needed)..."
+	@cd load-generator && uv venv --quiet || true
+	@cd load-generator && uv pip install --quiet -r requirements.txt
 
 load-gen: setup-load-gen load-gen-demo
 
 load-gen-demo: setup-load-gen
 	@echo "Starting load generator with demo profile..."
-	@cd load-generator && uv run --no-project python -m loadgen start --profile demo
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile demo
 
 load-gen-standard: setup-load-gen
 	@echo "Starting load generator with standard profile..."
-	@cd load-generator && uv run --no-project python -m loadgen start --profile standard
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile standard
 
 load-gen-peak: setup-load-gen
 	@echo "Starting load generator with peak profile..."
-	@cd load-generator && uv run --no-project python -m loadgen start --profile peak
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile peak
 
 load-gen-stress: setup-load-gen
 	@echo "Starting load generator with stress profile..."
-	@cd load-generator && uv run --no-project python -m loadgen start --profile stress
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile stress
 
 load-gen-health: setup-load-gen
-	@cd load-generator && uv run --no-project python -m loadgen health
+	@cd load-generator && uv run --no-sync python -m loadgen health
 
 test-load-gen: setup-load-gen
 	@echo "Running load generator tests..."
-	@cd load-generator && uv run --no-project pytest -v
+	@cd load-generator && uv run --no-sync pytest -v
