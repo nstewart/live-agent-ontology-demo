@@ -1,4 +1,4 @@
-.PHONY: help setup up up-agent down logs clean clean-network migrate seed reset-db test lint init-mz init-checkpointer load-gen load-gen-demo load-gen-standard load-gen-peak load-gen-stress load-gen-health test-load-gen
+.PHONY: help setup up up-agent down logs clean clean-network migrate seed reset-db test lint init-mz init-checkpointer setup-load-gen load-gen load-gen-demo load-gen-standard load-gen-peak load-gen-stress load-gen-health test-load-gen
 
 # Default target
 help:
@@ -22,6 +22,7 @@ help:
 	@echo "  make init-checkpointer - Initialize agent checkpointer tables"
 	@echo ""
 	@echo "Load Generation:"
+	@echo "  make setup-load-gen    - Install uv and set up load generator (auto-runs before other targets)"
 	@echo "  make load-gen          - Start load generator (demo profile)"
 	@echo "  make load-gen-demo     - Start with demo profile (5 orders/min)"
 	@echo "  make load-gen-standard - Start with standard profile (20 orders/min)"
@@ -65,7 +66,7 @@ init-mz:
 # Initialize Agent Checkpointer
 init-checkpointer:
 	@echo "Initializing agent checkpointer tables..."
-	docker-compose exec agents python -m src.init_checkpointer
+	docker-compose exec agents env PYTHONPATH=/app python -m src.init_checkpointer
 
 # Start services
 up:
@@ -112,7 +113,7 @@ up-agent:
 	@sleep 3
 	@echo ""
 	@echo "Initializing agent checkpointer..."
-	@docker-compose exec agents python -m src.init_checkpointer
+	@docker-compose exec agents env PYTHONPATH=/app python -m src.init_checkpointer
 	@echo ""
 	@echo "Note: Materialize is automatically initialized via materialize-init service"
 	@echo "      OpenSearch will be populated automatically once search-sync starts"
@@ -197,27 +198,44 @@ health:
 	@curl -s http://localhost:$${OS_PORT:-9200}/_cluster/health | jq . || echo "OpenSearch: Not responding"
 
 # Load Generation
-load-gen: load-gen-demo
+# Check for uv installation and set up environment
+setup-load-gen:
+	@if ! command -v uv &> /dev/null; then \
+		echo "Error: 'uv' is not installed."; \
+		echo ""; \
+		echo "To install uv:"; \
+		echo "  macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+		echo "  macOS (Homebrew): brew install uv"; \
+		echo "  Windows: powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\""; \
+		echo ""; \
+		echo "For more info: https://github.com/astral-sh/uv"; \
+		exit 1; \
+	fi
+	@echo "Setting up load generator (uv will install Python if needed)..."
+	@cd load-generator && uv venv --quiet || true
+	@cd load-generator && uv pip install --quiet -r requirements.txt
 
-load-gen-demo:
+load-gen: setup-load-gen load-gen-demo
+
+load-gen-demo: setup-load-gen
 	@echo "Starting load generator with demo profile..."
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project python -m loadgen start --profile demo
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile demo
 
-load-gen-standard:
+load-gen-standard: setup-load-gen
 	@echo "Starting load generator with standard profile..."
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project python -m loadgen start --profile standard
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile standard
 
-load-gen-peak:
+load-gen-peak: setup-load-gen
 	@echo "Starting load generator with peak profile..."
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project python -m loadgen start --profile peak
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile peak
 
-load-gen-stress:
+load-gen-stress: setup-load-gen
 	@echo "Starting load generator with stress profile..."
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project python -m loadgen start --profile stress
+	@cd load-generator && uv run --no-sync python -m loadgen start --profile stress
 
-load-gen-health:
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project python -m loadgen health
+load-gen-health: setup-load-gen
+	@cd load-generator && uv run --no-sync python -m loadgen health
 
-test-load-gen:
+test-load-gen: setup-load-gen
 	@echo "Running load generator tests..."
-	@cd load-generator && uv pip install -q -r requirements.txt && uv run --no-project pytest -v
+	@cd load-generator && uv run --no-sync pytest -v

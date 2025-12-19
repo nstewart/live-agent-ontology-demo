@@ -107,10 +107,10 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 
 **When helping staff create or modify orders:**
 1. Search for products by name or category using search_inventory
-2. Present found items with current prices and stock levels
+2. Present found items with live_price (dynamic pricing) and stock levels
 3. For new orders: use create_order with the confirmed items
 4. For existing orders: use manage_order_lines to add/update/delete items
-5. Always include unit_price from inventory search results
+5. Always use live_price (not base_price) from inventory search results - this includes all 7 dynamic pricing factors
 
 **When looking up orders:**
 1. Use search_orders to find orders by number, customer, or status
@@ -129,7 +129,28 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 - **Confirm changes**: Before modifying orders, confirm the change with the staff member
 - Default store is store:BK-01 (FreshMart Brooklyn 1) unless specified
 - Show prices in USD format ($X.XX)
-- When working with products, always include current stock availability"""
+- When working with products, always include current stock availability
+
+## Pricing Guidelines
+
+- **Always show live_price by default** - this is the current dynamic price that customers actually pay
+- Only show base_price if specifically requested or when explaining pricing breakdowns
+- **CRITICAL: Always fetch fresh pricing data** - Whenever a staff member asks about prices, product availability, or inventory:
+  - ALWAYS call search_inventory to get current real-time data
+  - NEVER rely on pricing information from conversation memory or previous tool calls
+  - Prices are dynamic and can change based on stock levels, demand, and time
+  - Even if you just searched for a product, search again if asked about its price
+- The live_price includes 7 real-time pricing factors:
+  1. **Zone adjustments**: Manhattan +15%, Brooklyn +5%, Queens baseline, Bronx -2%, Staten Island -5%
+  2. **Perishable discounts**: -5% for items requiring refrigeration to move inventory faster
+  3. **Local stock premiums**: +10% for ≤5 units at store, +3% for ≤15 units (store-specific scarcity)
+  4. **Popularity adjustments**: Top 3 products +20%, ranks 4-10 +10%, others -10% (by sales volume)
+  5. **Global scarcity premiums**: Top 3 scarcest +15%, ranks 4-10 +8% (total stock across all stores)
+  6. **Demand multipliers**: Based on recent sales price trends and velocity
+  7. **Demand premiums**: +5% for high-demand products above average sales
+- If showing price comparisons, format as: "$5.75 (live price, base: $5.00)"
+- When staff ask about pricing, you can explain which factors are affecting a specific product's price
+"""
 
 
 def get_llm():
@@ -239,16 +260,21 @@ def create_workflow() -> StateGraph:
     return workflow
 
 
-async def run_assistant(user_message: str, thread_id: str = "default") -> str:
+async def run_assistant(user_message: str, thread_id: str = "default", stream_events: bool = False):
     """
     Run the ops assistant with a user message.
 
     Args:
         user_message: Natural language request
         thread_id: Conversation thread ID for memory persistence (default: "default")
+        stream_events: If True, yields status updates during execution
 
-    Returns:
-        Assistant's final response
+    Yields:
+        tuple[str, Any]: Status updates as (event_type, data) tuples where event_type is one of:
+            - "tool_call": {"name": str, "args": dict} - Agent is calling a tool
+            - "tool_result": {"content": str} - Tool execution completed
+            - "error": {"message": str} - An error occurred during execution
+            - "response": str - Final response text (always emitted last)
     """
     settings = get_settings()
 
@@ -266,11 +292,64 @@ async def run_assistant(user_message: str, thread_id: str = "default") -> str:
             "iteration": 0,
         }
 
-        final_state = await graph.ainvoke(initial_state, config)
+        if stream_events:
+            # Stream events to show what's happening
+            final_response = None
+            try:
+                async for event in graph.astream(initial_state, config):
+                    # Agent node processing
+                    if "agent" in event:
+                        agent_data = event["agent"]
+                        if "messages" in agent_data and agent_data["messages"]:
+                            last_msg = agent_data["messages"][-1]
+                            if isinstance(last_msg, AIMessage):
+                                if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                                    # Agent decided to call tools
+                                    for tool_call in last_msg.tool_calls:
+                                        # Handle both dict and object formats
+                                        tool_name = getattr(tool_call, 'name', tool_call.get("name", "unknown") if isinstance(tool_call, dict) else "unknown")
+                                        tool_args = getattr(tool_call, 'args', tool_call.get("args", {}) if isinstance(tool_call, dict) else {})
+                                        yield ("tool_call", {"name": tool_name, "args": tool_args})
+                                elif last_msg.content:
+                                    # Agent produced a response
+                                    final_response = last_msg.content
 
-        # Get final AI response
-        for msg in reversed(final_state["messages"]):
-            if isinstance(msg, AIMessage) and msg.content:
-                return msg.content
+                    # Tool node processing
+                    elif "tools" in event:
+                        tools_data = event["tools"]
+                        if "messages" in tools_data and tools_data["messages"]:
+                            for msg in tools_data["messages"]:
+                                if isinstance(msg, ToolMessage):
+                                    # Extract tool name from the message
+                                    content_preview = str(msg.content)[:100]
+                                    yield ("tool_result", {"content": content_preview})
 
-        return "I couldn't complete that request."
+                # Yield final response
+                if final_response:
+                    yield ("response", final_response)
+                else:
+                    yield ("response", "I couldn't complete that request.")
+            except Exception as e:
+                # If an error occurs during streaming, yield error event and final response
+                yield ("error", {"message": str(e)})
+                yield ("response", "An error occurred while processing your request.")
+        else:
+            # Non-streaming: just get result and yield final response
+            try:
+                final_state = await graph.ainvoke(initial_state, config)
+
+                # Get final AI response
+                response = None
+                for msg in reversed(final_state["messages"]):
+                    if isinstance(msg, AIMessage) and msg.content:
+                        response = msg.content
+                        break
+
+                if response:
+                    yield ("response", response)
+                else:
+                    yield ("response", "I couldn't complete that request.")
+            except Exception as e:
+                # If an error occurs, yield error event and final response
+                yield ("error", {"message": str(e)})
+                yield ("response", "An error occurred while processing your request.")
