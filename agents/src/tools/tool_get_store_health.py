@@ -39,7 +39,7 @@ async def get_store_health(
             - Only applies to "inventory_risk" view
             - Default: shows CRITICAL and HIGH only for summary
 
-        limit: Maximum number of items to return (default: 10)
+        limit: Maximum number of items to return (default: 10, max: 100)
             - Applies to "capacity" and "inventory_risk" views
 
     Returns:
@@ -58,6 +58,14 @@ async def get_store_health(
         # Check Brooklyn store's high-risk produce items
         get_store_health(view="inventory_risk", store_id="store:BK-01", category="Produce", risk_level="HIGH")
     """
+    # Validate limit parameter
+    if limit < 1 or limit > 100:
+        return {
+            "view": view,
+            "error": f"Invalid limit: {limit}. Must be between 1 and 100.",
+            "recommendations": ["Please specify a limit between 1 and 100"],
+        }
+
     settings = get_settings()
 
     try:
@@ -113,6 +121,9 @@ async def get_store_health(
 
 async def _get_summary(conn: asyncpg.Connection) -> dict:
     """Get high-level overview of all three metrics."""
+
+    # Get current timestamp from database
+    current_time = await conn.fetchval("SELECT NOW()")
 
     # Query 1: Capacity health summary
     capacity_summary = await conn.fetch("""
@@ -192,7 +203,7 @@ async def _get_summary(conn: asyncpg.Connection) -> dict:
 
     return {
         "view": "summary",
-        "timestamp": "now",  # Could add actual timestamp from effective_updated_at
+        "timestamp": current_time.isoformat(),
         "capacity": {
             "total_stores": total_stores,
             "critical_stores": critical_stores,
@@ -272,60 +283,98 @@ async def _get_inventory_risk(
 ) -> dict:
     """Get products at risk of stockout."""
 
-    # Default to CRITICAL and HIGH if no risk_level specified
+    # Use separate queries instead of f-string interpolation to avoid SQL injection
     if not risk_level:
-        risk_filter = "risk_level IN ('CRITICAL', 'HIGH')"
+        # Default to CRITICAL and HIGH if no risk_level specified
+        aggregate_query = """
+            SELECT
+                COUNT(*) as total_count,
+                ROUND(SUM(revenue_at_risk)::numeric, 2) as total_revenue_at_risk,
+                SUM(CASE WHEN risk_level = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count
+            FROM inventory_risk_mv
+            WHERE ($1::text IS NULL OR store_id = $1)
+              AND ($2::text IS NULL OR category = $2)
+              AND risk_level IN ('CRITICAL', 'HIGH')
+        """
         aggregate_params = [store_id, category]
+
+        items_query = """
+            SELECT
+                inventory_id,
+                store_id,
+                store_name,
+                store_zone,
+                product_id,
+                product_name,
+                category,
+                stock_level,
+                pending_reservations,
+                revenue_at_risk,
+                perishable,
+                risk_level
+            FROM inventory_risk_mv
+            WHERE ($1::text IS NULL OR store_id = $1)
+              AND ($2::text IS NULL OR category = $2)
+              AND risk_level IN ('CRITICAL', 'HIGH')
+            ORDER BY
+                CASE risk_level
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                END,
+                revenue_at_risk DESC
+            LIMIT $3
+        """
         item_params = [store_id, category, limit]
     else:
-        risk_filter = "risk_level = $3"
+        # Specific risk level provided
+        aggregate_query = """
+            SELECT
+                COUNT(*) as total_count,
+                ROUND(SUM(revenue_at_risk)::numeric, 2) as total_revenue_at_risk,
+                SUM(CASE WHEN risk_level = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count
+            FROM inventory_risk_mv
+            WHERE ($1::text IS NULL OR store_id = $1)
+              AND ($2::text IS NULL OR category = $2)
+              AND risk_level = $3
+        """
         aggregate_params = [store_id, category, risk_level]
+
+        items_query = """
+            SELECT
+                inventory_id,
+                store_id,
+                store_name,
+                store_zone,
+                product_id,
+                product_name,
+                category,
+                stock_level,
+                pending_reservations,
+                revenue_at_risk,
+                perishable,
+                risk_level
+            FROM inventory_risk_mv
+            WHERE ($1::text IS NULL OR store_id = $1)
+              AND ($2::text IS NULL OR category = $2)
+              AND risk_level = $3
+            ORDER BY
+                CASE risk_level
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                END,
+                revenue_at_risk DESC
+            LIMIT $4
+        """
         item_params = [store_id, category, risk_level, limit]
 
     # First query: Get aggregate totals across ALL matching items (no limit)
-    aggregate_query = f"""
-        SELECT
-            COUNT(*) as total_count,
-            ROUND(SUM(revenue_at_risk)::numeric, 2) as total_revenue_at_risk,
-            SUM(CASE WHEN risk_level = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count
-        FROM inventory_risk_mv
-        WHERE ($1::text IS NULL OR store_id = $1)
-          AND ($2::text IS NULL OR category = $2)
-          AND {risk_filter}
-    """
-
     aggregates = await conn.fetchrow(aggregate_query, *aggregate_params)
 
     # Second query: Get individual items for display (with limit)
-    items_query = f"""
-        SELECT
-            inventory_id,
-            store_id,
-            store_name,
-            store_zone,
-            product_id,
-            product_name,
-            category,
-            stock_level,
-            pending_reservations,
-            revenue_at_risk,
-            perishable,
-            risk_level
-        FROM inventory_risk_mv
-        WHERE ($1::text IS NULL OR store_id = $1)
-          AND ($2::text IS NULL OR category = $2)
-          AND {risk_filter}
-        ORDER BY
-            CASE risk_level
-                WHEN 'CRITICAL' THEN 1
-                WHEN 'HIGH' THEN 2
-                WHEN 'MEDIUM' THEN 3
-                WHEN 'LOW' THEN 4
-            END,
-            revenue_at_risk DESC
-        LIMIT ${len(item_params)}
-    """
-
     rows = await conn.fetch(items_query, *item_params)
     items = [dict(row) for row in rows]
 
