@@ -275,12 +275,29 @@ async def _get_inventory_risk(
     # Default to CRITICAL and HIGH if no risk_level specified
     if not risk_level:
         risk_filter = "risk_level IN ('CRITICAL', 'HIGH')"
-        params = [store_id, category, limit]
+        aggregate_params = [store_id, category]
+        item_params = [store_id, category, limit]
     else:
         risk_filter = "risk_level = $3"
-        params = [store_id, category, risk_level, limit]
+        aggregate_params = [store_id, category, risk_level]
+        item_params = [store_id, category, risk_level, limit]
 
-    query = f"""
+    # First query: Get aggregate totals across ALL matching items (no limit)
+    aggregate_query = f"""
+        SELECT
+            COUNT(*) as total_count,
+            ROUND(SUM(revenue_at_risk)::numeric, 2) as total_revenue_at_risk,
+            SUM(CASE WHEN risk_level = 'CRITICAL' THEN 1 ELSE 0 END) as critical_count
+        FROM inventory_risk_mv
+        WHERE ($1::text IS NULL OR store_id = $1)
+          AND ($2::text IS NULL OR category = $2)
+          AND {risk_filter}
+    """
+
+    aggregates = await conn.fetchrow(aggregate_query, *aggregate_params)
+
+    # Second query: Get individual items for display (with limit)
+    items_query = f"""
         SELECT
             inventory_id,
             store_id,
@@ -306,33 +323,39 @@ async def _get_inventory_risk(
                 WHEN 'LOW' THEN 4
             END,
             revenue_at_risk DESC
-        LIMIT ${len(params)}
+        LIMIT ${len(item_params)}
     """
 
-    rows = await conn.fetch(query, *params)
-
+    rows = await conn.fetch(items_query, *item_params)
     items = [dict(row) for row in rows]
 
-    # Calculate totals
-    total_revenue_at_risk = sum(float(item['revenue_at_risk']) for item in items)
-    critical_items = [i for i in items if i['risk_level'] == 'CRITICAL']
+    # Use aggregates from first query (accurate totals)
+    total_count = int(aggregates['total_count'])
+    total_revenue_at_risk = float(aggregates['total_revenue_at_risk'] or 0)
+    critical_count = int(aggregates['critical_count'])
 
     # Generate recommendations
     recommendations = []
-    if critical_items:
-        top_critical = critical_items[:3]
-        products = ', '.join(f"{i['product_name']} at {i['store_name']}" for i in top_critical)
-        recommendations.append(f"URGENT: Immediate replenishment needed for {products}")
+    if critical_count > 0:
+        # Get critical items from the display list for product names
+        critical_items = [i for i in items if i['risk_level'] == 'CRITICAL']
+        if critical_items:
+            top_critical = critical_items[:3]
+            products = ', '.join(f"{i['product_name']} at {i['store_name']}" for i in top_critical)
+            recommendations.append(f"URGENT: Immediate replenishment needed for {products}")
+        if critical_count > len(critical_items):
+            recommendations.append(f"WARNING: {critical_count} total CRITICAL items (showing top {len(critical_items)})")
     if total_revenue_at_risk > 1000:
         recommendations.append(f"ALERT: ${total_revenue_at_risk:.2f} in pending orders at risk - prioritize fulfillment")
-    if len(items) > 10:
-        recommendations.append(f"WARNING: {len(items)} products showing inventory strain - review replenishment schedule")
-    if not items:
+    if total_count > 10:
+        recommendations.append(f"WARNING: {total_count} products showing inventory strain - review replenishment schedule")
+    if total_count == 0:
         recommendations.append("No high-risk inventory issues found - inventory levels healthy")
 
     return {
         "view": "inventory_risk",
         "item_count": len(items),
+        "total_count": total_count,
         "total_revenue_at_risk": round(total_revenue_at_risk, 2),
         "items": items,
         "recommendations": recommendations,
