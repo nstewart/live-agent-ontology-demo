@@ -19,7 +19,6 @@ Guide for developers contributing to the FreshMart Digital Twin project.
 - Docker and Docker Compose
 - Node.js 18+ (for web development)
 - Python 3.11+ (for API/agent development)
-- PostgreSQL client tools (psql)
 - Make (optional, but recommended)
 
 ### Initial Setup
