@@ -49,7 +49,8 @@ for seed in "$SCRIPT_DIR/../seed"/*.sql; do
     if [ -f "$seed" ]; then
         filename=$(basename "$seed")
         echo "Running seed: $filename"
-        psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -f "$seed"
+        # Use psql from Docker container to avoid requiring local psql installation
+        docker-compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/seed/$filename"
     fi
 done
 

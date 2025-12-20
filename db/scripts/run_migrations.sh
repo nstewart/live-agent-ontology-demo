@@ -27,7 +27,8 @@ for migration in "$SCRIPT_DIR/../migrations"/*.sql; do
     if [ -f "$migration" ]; then
         filename=$(basename "$migration")
         echo "Applying migration: $filename"
-        psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DATABASE" -f "$migration"
+        # Use psql from Docker container to avoid requiring local psql installation
+        docker-compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/migrations/$filename"
     fi
 done
 
