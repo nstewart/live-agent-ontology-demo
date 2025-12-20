@@ -373,6 +373,16 @@ class OrderLineService:
         if not current:
             raise ValueError(f"Line item {line_id} not found")
 
+        # Track what's being updated for logging
+        changes = []
+        triples_written = 0
+        if updates.quantity is not None and updates.quantity != current.quantity:
+            changes.append(f"quantity: {current.quantity} → {updates.quantity}")
+        if updates.unit_price is not None and updates.unit_price != current.unit_price:
+            changes.append(f"unit_price: {current.unit_price} → {updates.unit_price}")
+        if updates.line_sequence is not None and updates.line_sequence != current.line_sequence:
+            changes.append(f"line_sequence: {current.line_sequence} → {updates.line_sequence}")
+
         # Apply updates
         new_quantity = updates.quantity if updates.quantity is not None else current.quantity
         new_unit_price = (
@@ -403,6 +413,7 @@ class OrderLineService:
                 """),
                 {"line_id": line_id, "value": str(new_quantity)},
             )
+            triples_written += 1
 
         if updates.unit_price is not None:
             await self.session.execute(
@@ -413,6 +424,7 @@ class OrderLineService:
                 """),
                 {"line_id": line_id, "value": str(new_unit_price)},
             )
+            triples_written += 1
 
         if updates.line_sequence is not None:
             await self.session.execute(
@@ -423,6 +435,7 @@ class OrderLineService:
                 """),
                 {"line_id": line_id, "value": str(new_sequence)},
             )
+            triples_written += 1
 
         # Always update line_amount if quantity or unit_price changed
         if updates.quantity is not None or updates.unit_price is not None:
@@ -434,6 +447,13 @@ class OrderLineService:
                 """),
                 {"line_id": line_id, "value": str(new_line_amount)},
             )
+            triples_written += 1
+            if current.line_amount != new_line_amount:
+                changes.append(f"line_amount: {current.line_amount} → {new_line_amount}")
+
+        # Log summary of changes
+        if changes:
+            logger.info(f"📝 [LINE ITEM UPDATE] {line_id} ({triples_written} triples): {', '.join(changes)}")
 
         # Return updated item
         return await self.get_line_item(line_id)
