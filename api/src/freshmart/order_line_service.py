@@ -371,6 +371,7 @@ class OrderLineService:
             raise ValueError(f"Line item {line_id} not found")
 
         # Track what's being updated for logging
+        logger.info(f"🔵 [TRANSACTION START] Updating line item {line_id}")
         changes = []
         triples_written = 0
         if updates.quantity is not None and updates.quantity != current.quantity:
@@ -388,17 +389,6 @@ class OrderLineService:
         new_sequence = (
             updates.line_sequence if updates.line_sequence is not None else current.line_sequence
         )
-
-        # Calculate line amount - handle case where unit_price might be None
-        if new_unit_price is not None:
-            new_line_amount = new_quantity * new_unit_price
-        elif current.line_amount is not None and current.quantity:
-            # Calculate unit price from existing line amount
-            new_unit_price = current.line_amount / current.quantity
-            new_line_amount = new_quantity * new_unit_price
-        else:
-            # Fallback - keep existing line amount or set to 0
-            new_line_amount = current.line_amount or 0
 
         # Update triples
         if updates.quantity is not None:
@@ -433,11 +423,6 @@ class OrderLineService:
                 {"line_id": line_id, "value": str(new_sequence)},
             )
             triples_written += 1
-
-        # Note: line_amount is derived in Materialize views, so we calculate it here for logging only
-        if updates.quantity is not None or updates.unit_price is not None:
-            if current.line_amount != new_line_amount:
-                changes.append(f"line_amount: {current.line_amount} → {new_line_amount} (derived)")
 
         # Log summary of changes
         if changes:
