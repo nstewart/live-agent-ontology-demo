@@ -708,6 +708,7 @@ echo "Creating CEO metrics materialized views..."
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW IF NOT EXISTS pricing_yield_mv IN CLUSTER compute AS
 SELECT
+    ol.line_id,
     ol.order_id,
     o.store_id,
     s.store_zone,
