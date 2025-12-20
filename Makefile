@@ -58,9 +58,7 @@ setup:
 # Initialize Materialize
 init-mz:
 	@echo "Initializing Materialize..."
-	@echo "Waiting for Materialize to be ready..."
-	@sleep 5
-	./db/materialize/init.sh
+	docker-compose run --rm -T materialize-init
 	@echo "Materialize initialized successfully!"
 
 # Initialize Agent Checkpointer
