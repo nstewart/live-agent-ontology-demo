@@ -403,8 +403,8 @@ class BaseSubscribeWorker(ABC):
                 if self.subscribe_client:
                     try:
                         await self.subscribe_client.close()
-                    except:
-                        pass
+                    except Exception as close_error:
+                        logger.debug(f"Error closing client during cleanup: {close_error}")
                     self.subscribe_client = None
 
                 # Exponential backoff
@@ -570,6 +570,9 @@ class BaseSubscribeWorker(ABC):
         if upsert_ids:
             logger.info(f"  Inserts @ mz_ts={timestamp} -> {index_name}: {len(upsert_ids)} docs {upsert_ids}")
         if update_diffs:
+            # Maximum number of items to show in log summaries to prevent noise
+            MAX_ITEMS_TO_LOG = 3
+
             def summarize_array_diff(old_list, new_list, id_key='id'):
                 """Summarize changes between two lists of dicts."""
                 if not old_list or not new_list:
@@ -615,7 +618,7 @@ class BaseSubscribeWorker(ABC):
                                 header = f"({full_id})"
                             # Add item header followed by each field change as separate entries
                             changes.append(header)
-                            changes.extend(item_changes[:3])
+                            changes.extend(item_changes[:MAX_ITEMS_TO_LOG])
 
                 if changes:
                     return ' | '.join(changes)
@@ -670,16 +673,16 @@ class BaseSubscribeWorker(ABC):
                         else:
                             logger.info(f"      {doc_id}")
                     else:
-                        # Show first 3 items with product names, summarize rest
+                        # Show first few items with product names, summarize rest
                         items_display = []
-                        for doc_id, product_name in doc_info_list[:3]:
+                        for doc_id, product_name in doc_info_list[:MAX_ITEMS_TO_LOG]:
                             if product_name:
                                 items_display.append(f"{product_name} ({doc_id})")
                             else:
                                 items_display.append(doc_id)
                         ids_str = ', '.join(items_display)
-                        if len(doc_info_list) > 3:
-                            ids_str += f", +{len(doc_info_list) - 3} more"
+                        if len(doc_info_list) > MAX_ITEMS_TO_LOG:
+                            ids_str += f", +{len(doc_info_list) - MAX_ITEMS_TO_LOG} more"
                         logger.info(f"      {len(doc_info_list)} items: {ids_str}")
 
                     # Log each field change on its own line

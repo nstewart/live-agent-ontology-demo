@@ -591,6 +591,8 @@ SELECT
 
 FROM store_inventory_mv inv
 LEFT JOIN pricing_factors pf ON pf.product_id = inv.product_id
+-- Note: Previously filtered out OUT_OF_STOCK items, but now includes all items with unit_price
+-- to allow agents and search to see complete inventory state including out-of-stock items
 WHERE inv.unit_price IS NOT NULL;"
 
 # Orders with aggregated line items and search fields (customer, store, delivery info)
