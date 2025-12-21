@@ -30,7 +30,7 @@ async def get_session() -> AsyncSession:
             yield session
             await session.commit()
         except Exception as e:
-            logger.error(f"❌ [TRANSACTION] PostgreSQL transaction failed, rolling back: {e}")
+            logger.error(f"[TRANSACTION] PostgreSQL transaction failed, rolling back: {e}")
             await session.rollback()
             raise
 

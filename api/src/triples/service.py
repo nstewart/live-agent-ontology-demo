@@ -174,7 +174,7 @@ class TripleService:
 
     async def create_triples_batch(self, triples: list[TripleCreate]) -> list[Triple]:
         """Create multiple triples in a batch."""
-        logger.info(f"🔵 [TRANSACTION START] Creating {len(triples)} new triples")
+        logger.info(f"[BATCH INSERT] Creating {len(triples)} new triples")
 
         # Log transaction start with summary of what's being written
         subjects = {}  # subject_id -> list of predicates
@@ -205,7 +205,7 @@ class TripleService:
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"  📝 [BATCH INSERT] Writing {len(triples)} triples → {entity_summary}"
+            f"  Writing {len(triples)} triples -> {entity_summary}"
         )
         for subject_id, predicates in subjects.items():
             logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
@@ -280,7 +280,7 @@ class TripleService:
             if not prefix:
                 raise ValueError(f"Invalid subject_id format: '{triple.subject_id}'. Prefix cannot be empty")
 
-        logger.info(f"🔵 [TRANSACTION START] Upserting {len(triples)} triples")
+        logger.info(f"[BATCH UPSERT] Upserting {len(triples)} triples")
 
         # Log transaction start
         subjects = {}
@@ -311,7 +311,7 @@ class TripleService:
 
         MAX_PREDICATES_TO_LOG = 3
         logger.info(
-            f"  📝 [BATCH UPSERT] Upserting {len(triples)} triples → {entity_summary}"
+            f"  Upserting {len(triples)} triples -> {entity_summary}"
         )
         for subject_id, predicates in subjects.items():
             logger.info(f"     • {subject_id}: {len(predicates)} properties ({', '.join(predicates[:MAX_PREDICATES_TO_LOG])}{'...' if len(predicates) > MAX_PREDICATES_TO_LOG else ''})")
@@ -398,7 +398,7 @@ class TripleService:
 
         # Log the update
         logger.info(
-            f"📝 {existing.subject_id}: updating {existing.predicate} "
+            f"{existing.subject_id}: updating {existing.predicate} "
             f"from '{existing.object_value}' to '{data.object_value}'"
         )
 
