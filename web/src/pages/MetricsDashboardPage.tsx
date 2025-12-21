@@ -170,7 +170,10 @@ export default function MetricsDashboardPage() {
                   .slice(0, 20)
                   .map((item) => (
                     <tr key={item.inventory_id} className="hover:bg-gray-50">
-                      <td className="px-4 py-2">{item.product_name}</td>
+                      <td className="px-4 py-2">
+                        <div className="font-medium text-gray-900">{item.product_name}</div>
+                        <div className="text-xs text-gray-400">{item.product_id}</div>
+                      </td>
                       <td className="px-4 py-2 text-gray-600">{item.store_name}</td>
                       <td className="px-4 py-2 text-center">{item.stock_level}</td>
                       <td className="px-4 py-2 text-center">
