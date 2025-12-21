@@ -86,6 +86,7 @@ export interface StoreInventory {
   inventory_id: string
   store_id: string | null
   product_id: string | null
+  product_name: string | null
   stock_level: number | null
   replenishment_eta: string | null
 }
