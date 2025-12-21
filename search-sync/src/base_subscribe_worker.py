@@ -570,73 +570,95 @@ class BaseSubscribeWorker(ABC):
         if upsert_ids:
             logger.info(f"  ➕ Inserts @ mz_ts={timestamp} → {index_name}: {len(upsert_ids)} docs {upsert_ids}")
         if update_diffs:
-            for doc_id, old_doc, new_doc in update_diffs:
-                # Compute actual diff between old and new documents
-                diffs = []
-                if old_doc and new_doc:
-                    def summarize_array_diff(old_list, new_list, id_key='id'):
-                        """Summarize changes between two lists of dicts."""
-                        if not old_list or not new_list:
-                            return f"{len(old_list or [])} items → {len(new_list or [])} items"
+            def summarize_array_diff(old_list, new_list, id_key='id'):
+                """Summarize changes between two lists of dicts."""
+                if not old_list or not new_list:
+                    return f"{len(old_list or [])} items → {len(new_list or [])} items"
 
-                        # Try to match items by common ID keys
-                        id_keys = ['line_id', 'id', 'inventory_id', 'product_id']
-                        matched_key = None
-                        for k in id_keys:
-                            if old_list[0].get(k) and new_list[0].get(k):
-                                matched_key = k
-                                break
+                # Try to match items by common ID keys
+                id_keys = ['line_id', 'id', 'inventory_id', 'product_id']
+                matched_key = None
+                for k in id_keys:
+                    if old_list[0].get(k) and new_list[0].get(k):
+                        matched_key = k
+                        break
 
-                        if not matched_key:
-                            return f"{len(old_list)} items → {len(new_list)} items"
+                if not matched_key:
+                    return f"{len(old_list)} items → {len(new_list)} items"
 
-                        # Build lookup by ID
-                        old_by_id = {item.get(matched_key): item for item in old_list}
-                        new_by_id = {item.get(matched_key): item for item in new_list}
+                # Build lookup by ID
+                old_by_id = {item.get(matched_key): item for item in old_list}
+                new_by_id = {item.get(matched_key): item for item in new_list}
 
-                        changes = []
-                        for item_id, new_item in new_by_id.items():
-                            old_item = old_by_id.get(item_id)
-                            if old_item:
-                                # Find changed fields within this item
-                                item_changes = []
-                                for field in new_item:
-                                    if field in (matched_key,) or field.endswith('_at'):
-                                        continue
-                                    if old_item.get(field) != new_item.get(field):
-                                        item_changes.append(f"{field}: {old_item.get(field)} → {new_item.get(field)}")
-                                if item_changes:
-                                    short_id = item_id.split(':')[-1] if ':' in str(item_id) else item_id
-                                    changes.append(f"[{short_id}] {', '.join(item_changes[:3])}")
-
-                        if changes:
-                            return '; '.join(changes[:3])  # Limit to 3 item changes
-                        return f"{len(new_list)} items (no field changes)"
-
-                    for key in new_doc:
-                        old_val = old_doc.get(key)
-                        new_val = new_doc.get(key)
-                        if old_val != new_val:
-                            # Skip timestamp fields and id
-                            if key.endswith('_at') or key in ('id',):
+                changes = []
+                for item_id, new_item in new_by_id.items():
+                    old_item = old_by_id.get(item_id)
+                    if old_item:
+                        # Find changed fields within this item
+                        item_changes = []
+                        for field in new_item:
+                            if field in (matched_key,) or field.endswith('_at'):
                                 continue
-                            # Summarize arrays
-                            if isinstance(old_val, list) and isinstance(new_val, list):
-                                summary = summarize_array_diff(old_val, new_val)
-                                diffs.append(f"{key}: {summary}")
-                            else:
-                                old_str = str(old_val) if old_val is not None else 'null'
-                                new_str = str(new_val) if new_val is not None else 'null'
-                                diffs.append(f"{key}: {old_str} → {new_str}")
-                if diffs:
-                    diffs_str = ', '.join(diffs)
-                    logger.info(f"  🔄 Update @ mz_ts={timestamp} → {index_name}: {doc_id} [{diffs_str}]")
-                elif not old_doc:
-                    logger.info(f"  🔄 Update @ mz_ts={timestamp} → {index_name}: {doc_id} [no previous state available]")
+                            if old_item.get(field) != new_item.get(field):
+                                item_changes.append(f"{field}: {old_item.get(field)} → {new_item.get(field)}")
+                        if item_changes:
+                            short_id = item_id.split(':')[-1] if ':' in str(item_id) else item_id
+                            changes.append(f"[{short_id}] {', '.join(item_changes[:3])}")
+
+                if changes:
+                    return '; '.join(changes[:3])  # Limit to 3 item changes
+                return f"{len(new_list)} items (no field changes)"
+
+            def compute_diff_signature(old_doc, new_doc):
+                """Compute a diff string for grouping similar updates."""
+                if not old_doc or not new_doc:
+                    return None
+                diffs = []
+                for key in new_doc:
+                    old_val = old_doc.get(key)
+                    new_val = new_doc.get(key)
+                    if old_val != new_val:
+                        if key.endswith('_at') or key in ('id',):
+                            continue
+                        if isinstance(old_val, list) and isinstance(new_val, list):
+                            summary = summarize_array_diff(old_val, new_val)
+                            diffs.append(f"{key}: {summary}")
+                        else:
+                            old_str = str(old_val) if old_val is not None else 'null'
+                            new_str = str(new_val) if new_val is not None else 'null'
+                            diffs.append(f"{key}: {old_str} → {new_str}")
+                return ', '.join(diffs) if diffs else None
+
+            # Group updates by their diff signature
+            from collections import defaultdict
+            signature_groups = defaultdict(list)
+            no_old_doc = []
+
+            for doc_id, old_doc, new_doc in update_diffs:
+                if not old_doc:
+                    no_old_doc.append(doc_id)
                 else:
-                    # Debug: show what keys were checked
-                    changed_keys = [k for k in new_doc if old_doc.get(k) != new_doc.get(k)]
-                    logger.info(f"  🔄 Update @ mz_ts={timestamp} → {index_name}: {doc_id} [changed keys: {changed_keys}]")
+                    sig = compute_diff_signature(old_doc, new_doc)
+                    if sig:
+                        signature_groups[sig].append(doc_id)
+
+            # Log grouped updates
+            if signature_groups:
+                logger.info(f"  🔄 Updates @ mz_ts={timestamp} → {index_name}:")
+                for sig, doc_ids in signature_groups.items():
+                    if len(doc_ids) == 1:
+                        logger.info(f"      • {doc_ids[0]} [{sig}]")
+                    else:
+                        # Show first 3 IDs, summarize rest
+                        short_ids = [d.split(':')[-1] if ':' in d else d for d in doc_ids[:3]]
+                        ids_str = ', '.join(short_ids)
+                        if len(doc_ids) > 3:
+                            ids_str += f", +{len(doc_ids) - 3} more"
+                        logger.info(f"      • [{sig}] × {len(doc_ids)} items ({ids_str})")
+
+            if no_old_doc:
+                for doc_id in no_old_doc:
+                    logger.info(f"  🔄 Update @ mz_ts={timestamp} → {index_name}: {doc_id} [no previous state available]")
         if delete_ids:
             logger.info(f"  ❌ Deletes @ mz_ts={timestamp} → {index_name}: {len(delete_ids)} docs {delete_ids}")
 
