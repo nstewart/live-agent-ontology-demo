@@ -591,8 +591,7 @@ SELECT
 
 FROM store_inventory_mv inv
 LEFT JOIN pricing_factors pf ON pf.product_id = inv.product_id
-WHERE inv.availability_status != 'OUT_OF_STOCK'
-  AND inv.unit_price IS NOT NULL;"
+WHERE inv.unit_price IS NOT NULL;"
 
 # Orders with aggregated line items and search fields (customer, store, delivery info)
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
