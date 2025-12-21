@@ -183,10 +183,10 @@ export default function StoresInventoryPage() {
   // 🔥 ZERO - Real-time stores with inventory via relationship
   const z = useZero<Schema>()
 
-  // Stores with related inventory - Zero handles the join!
+  // Stores with related inventory and product details - Zero handles the joins!
   const [storesData] = useQuery(
     z.query.stores_mv
-      .related('inventory', q => q.orderBy('inventory_id', 'asc'))
+      .related('inventory', q => q.related('product').orderBy('inventory_id', 'asc'))
       .orderBy('store_id', 'asc')
   )
 
@@ -202,6 +202,7 @@ export default function StoresInventoryPage() {
       inventory_id: inv.inventory_id,
       store_id: inv.store_id ?? null,
       product_id: inv.product_id ?? null,
+      product_name: inv.product?.product_name ?? null,
       stock_level: inv.stock_level ?? null,
       replenishment_eta: inv.replenishment_eta ?? null,
     })),
@@ -465,9 +466,16 @@ export default function StoresInventoryPage() {
                       <tbody>
                         {store.inventory_items.slice(0, 5).map(item => (
                           <tr key={item.inventory_id} className="border-b last:border-0">
-                            <td className="py-2 flex items-center gap-2">
-                              <Package className="h-4 w-4 text-gray-400" />
-                              {item.product_id}
+                            <td className="py-2">
+                              <div className="flex items-center gap-2">
+                                <Package className="h-4 w-4 text-gray-400" />
+                                <span className="font-medium text-gray-900">
+                                  {item.product_name || item.product_id}
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-400 ml-6">
+                                {item.product_id}
+                              </div>
                             </td>
                             <td className="py-2">
                               <span className={`flex items-center gap-1 ${(item.stock_level || 0) < 10 ? 'text-red-600' : 'text-gray-900'}`}>
@@ -617,9 +625,16 @@ export default function StoresInventoryPage() {
                 <tbody>
                   {viewAllInventoryStore.inventory_items.map(item => (
                     <tr key={item.inventory_id} className="border-b last:border-0">
-                      <td className="py-2 flex items-center gap-2">
-                        <Package className="h-4 w-4 text-gray-400" />
-                        {item.product_id}
+                      <td className="py-2">
+                        <div className="flex items-center gap-2">
+                          <Package className="h-4 w-4 text-gray-400" />
+                          <span className="font-medium text-gray-900">
+                            {item.product_name || item.product_id}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400 ml-6">
+                          {item.product_id}
+                        </div>
                       </td>
                       <td className="py-2">
                         <span className={`flex items-center gap-1 ${(item.stock_level || 0) < 10 ? 'text-red-600' : 'text-gray-900'}`}>

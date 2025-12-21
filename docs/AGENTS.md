@@ -209,6 +209,28 @@ print(response2)  # Agent remembers Lisa from previous message
 
 ## Available Tools
 
+### list_stores
+
+List all FreshMart store locations with their IDs and details.
+
+**Parameters:**
+- `zone` (str, optional): Filter by zone (MAN, BK, QNS, BX, SI)
+
+**Example:**
+```python
+# List all stores
+stores = await list_stores()
+
+# List stores in Queens only
+stores = await list_stores(zone="QNS")
+```
+
+**Returns:**
+- List of stores with store_id, store_name, zone, and address
+
+**Use Case:**
+Use this tool FIRST when a user mentions a store by name or zone to find the correct store_id for use with other tools like search_inventory.
+
 ### search_orders
 
 Search for orders using natural language via OpenSearch.
@@ -402,13 +424,21 @@ results = await write_triples([
 "Add a customer John Smith, address 456 Oak St, Brooklyn, phone 555-9999"
 ```
 
+### Store Queries
+
+```
+"List all stores"
+"What stores are in Queens?"
+"Show me all Brooklyn stores"
+"Find stores in Manhattan"
+```
+
 ### System Queries
 
 ```
 "What entity types exist in the system?"
 "Show me properties for the Order class"
 "What statuses can an order have?"
-"List all the available stores"
 ```
 
 ## Customizing the Agent
@@ -441,10 +471,11 @@ async def check_store_capacity(store_id: str) -> dict:
 from src.tools import check_store_capacity
 
 TOOLS = [
+    create_customer,
+    list_stores,  # Note: list_stores should be early in the list
     search_orders,
     search_inventory,
     fetch_order_context,
-    create_customer,
     create_order,
     get_ontology,
     write_triples,
