@@ -603,7 +603,7 @@ class BaseSubscribeWorker(ABC):
                                 item_changes.append(f"{field}: {old_item.get(field)} → {new_item.get(field)}")
                         if item_changes:
                             short_id = item_id.split(':')[-1] if ':' in str(item_id) else item_id
-                            changes.append(f"[{short_id}] {', '.join(item_changes[:3])}")
+                            changes.append(f"[{short_id}] {' | '.join(item_changes[:3])}")
 
                 if changes:
                     return '; '.join(changes[:3])  # Limit to 3 item changes
@@ -627,7 +627,7 @@ class BaseSubscribeWorker(ABC):
                             old_str = str(old_val) if old_val is not None else 'null'
                             new_str = str(new_val) if new_val is not None else 'null'
                             diffs.append(f"{key}: {old_str} → {new_str}")
-                return ', '.join(diffs) if diffs else None
+                return ' | '.join(diffs) if diffs else None
 
             # Group updates by their diff signature
             from collections import defaultdict
@@ -647,7 +647,7 @@ class BaseSubscribeWorker(ABC):
                 logger.info(f"  🔄 Updates @ mz_ts={timestamp} → {index_name}:")
                 for sig, doc_ids in signature_groups.items():
                     # Parse the signature into individual field changes
-                    field_changes = sig.split(', ')
+                    field_changes = sig.split(' | ')
 
                     if len(doc_ids) == 1:
                         logger.info(f"      • {doc_ids[0]}")
