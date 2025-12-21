@@ -396,12 +396,9 @@ class TripleService:
         if not existing:
             return None
 
-        # Log transaction start for single update
+        # Log the update
         logger.info(
-            f"🔵 PG_TXN_START: Writing 1 triple (update)"
-        )
-        logger.info(
-            f"  📝 {existing.subject_id}: updating {existing.predicate} "
+            f"📝 {existing.subject_id}: updating {existing.predicate} "
             f"from '{existing.object_value}' to '{data.object_value}'"
         )
 

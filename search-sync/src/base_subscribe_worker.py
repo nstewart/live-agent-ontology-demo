@@ -720,7 +720,7 @@ class BaseSubscribeWorker(ABC):
                 self.events_processed += upsert_count + delete_count
                 self.flush_count += 1
 
-                logger.info(
+                logger.debug(
                     f"Flush #{self.flush_count} complete. "
                     f"Total events processed: {self.events_processed}"
                 )
