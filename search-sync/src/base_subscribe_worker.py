@@ -602,9 +602,19 @@ class BaseSubscribeWorker(ABC):
                             if old_item.get(field) != new_item.get(field):
                                 item_changes.append(f"  {field}: {old_item.get(field)} -> {new_item.get(field)}")
                         if item_changes:
-                            short_id = item_id.split(':')[-1] if ':' in str(item_id) else item_id
+                            # Get product name if available, build full ID with prefix
+                            product_name = new_item.get('product_name')
+                            # Add prefix based on matched key type
+                            if matched_key == 'line_id' and not str(item_id).startswith('orderline:'):
+                                full_id = f"orderline:{item_id}"
+                            else:
+                                full_id = item_id
+                            if product_name:
+                                header = f"{product_name} ({full_id})"
+                            else:
+                                header = f"({full_id})"
                             # Add item header followed by each field change as separate entries
-                            changes.append(f"[{short_id}]")
+                            changes.append(header)
                             changes.extend(item_changes[:3])
 
                 if changes:
@@ -642,24 +652,35 @@ class BaseSubscribeWorker(ABC):
                 else:
                     sig = compute_diff_signature(old_doc, new_doc)
                     if sig:
-                        signature_groups[sig].append(doc_id)
+                        # Store doc_id and product_name (if available) for display
+                        product_name = new_doc.get('product_name') if new_doc else None
+                        signature_groups[sig].append((doc_id, product_name))
 
             # Log grouped updates in table format
             if signature_groups:
                 logger.info(f"  Updates @ mz_ts={timestamp} -> {index_name}:")
-                for sig, doc_ids in signature_groups.items():
+                for sig, doc_info_list in signature_groups.items():
                     # Parse the signature into individual field changes
                     field_changes = sig.split(' | ')
 
-                    if len(doc_ids) == 1:
-                        logger.info(f"      {doc_ids[0]}")
+                    if len(doc_info_list) == 1:
+                        doc_id, product_name = doc_info_list[0]
+                        if product_name:
+                            logger.info(f"      {product_name} ({doc_id})")
+                        else:
+                            logger.info(f"      {doc_id}")
                     else:
-                        # Show first 3 IDs, summarize rest
-                        short_ids = [d.split(':')[-1] if ':' in d else d for d in doc_ids[:3]]
-                        ids_str = ', '.join(short_ids)
-                        if len(doc_ids) > 3:
-                            ids_str += f", +{len(doc_ids) - 3} more"
-                        logger.info(f"      x {len(doc_ids)} items ({ids_str})")
+                        # Show first 3 items with product names, summarize rest
+                        items_display = []
+                        for doc_id, product_name in doc_info_list[:3]:
+                            if product_name:
+                                items_display.append(f"{product_name} ({doc_id})")
+                            else:
+                                items_display.append(doc_id)
+                        ids_str = ', '.join(items_display)
+                        if len(doc_info_list) > 3:
+                            ids_str += f", +{len(doc_info_list) - 3} more"
+                        logger.info(f"      {len(doc_info_list)} items: {ids_str}")
 
                     # Log each field change on its own line
                     for change in field_changes:
