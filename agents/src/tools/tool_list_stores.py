@@ -7,12 +7,15 @@ from src.config import get_settings
 
 
 @tool
-async def list_stores() -> list[dict]:
+async def list_stores(zone: str = None) -> list[dict]:
     """
     List all FreshMart store locations with their IDs and details.
 
     Use this tool FIRST when a user mentions a store by name or zone to find the correct store_id.
     Store IDs use abbreviated zone codes (e.g., QNS for Queens, MAN for Manhattan).
+
+    Args:
+        zone: Optional zone filter (MAN, BK, QNS, BX, SI). If provided, only returns stores in that zone.
 
     Returns:
         List of stores with:
@@ -30,7 +33,7 @@ async def list_stores() -> list[dict]:
 
     Example workflow:
         1. User asks: "What vegetables are available at the Queens store?"
-        2. Call list_stores() to find Queens store IDs (store:QNS-01, store:QNS-02)
+        2. Call list_stores(zone="QNS") to find Queens store IDs (store:QNS-01, store:QNS-02)
         3. Call search_inventory(query="vegetable", store_id="store:QNS-01")
     """
     settings = get_settings()
@@ -44,6 +47,10 @@ async def list_stores() -> list[dict]:
             response.raise_for_status()
             stores = response.json()
 
+            # Filter by zone if provided
+            if zone:
+                stores = [s for s in stores if s.get("zone") == zone]
+
             # Return simplified store info
             return [
                 {
@@ -55,5 +62,6 @@ async def list_stores() -> list[dict]:
                 for store in stores
             ]
 
-        except httpx.HTTPError as e:
-            return [{"error": f"Failed to fetch stores: {str(e)}"}]
+        except httpx.HTTPError:
+            # Return empty list on error instead of error dict
+            return []

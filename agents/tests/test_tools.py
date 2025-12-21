@@ -1182,6 +1182,190 @@ class TestSearchInventory:
                 assert any("product:item2" in url for url in call_urls)
 
 
+class TestListStores:
+    """Tests for list_stores tool."""
+
+    @pytest.mark.asyncio
+    async def test_returns_all_stores(self, mock_settings):
+        """Returns all stores with correct fields."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = [
+                    {
+                        "store_id": "store:QNS-01",
+                        "store_name": "FreshMart Queens 1",
+                        "zone": "QNS",
+                        "address": "123 Queens Blvd, Queens, NY",
+                    },
+                    {
+                        "store_id": "store:BK-01",
+                        "store_name": "FreshMart Brooklyn 1",
+                        "zone": "BK",
+                        "address": "456 Brooklyn Ave, Brooklyn, NY",
+                    },
+                ]
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({})
+
+                assert len(results) == 2
+                assert results[0]["store_id"] == "store:QNS-01"
+                assert results[0]["store_name"] == "FreshMart Queens 1"
+                assert results[0]["zone"] == "QNS"
+                assert results[0]["address"] == "123 Queens Blvd, Queens, NY"
+
+    @pytest.mark.asyncio
+    async def test_filters_by_zone(self, mock_settings):
+        """Filters stores by zone when zone parameter is provided."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = [
+                    {
+                        "store_id": "store:QNS-01",
+                        "store_name": "FreshMart Queens 1",
+                        "zone": "QNS",
+                        "address": "123 Queens Blvd, Queens, NY",
+                    },
+                    {
+                        "store_id": "store:QNS-02",
+                        "store_name": "FreshMart Queens 2",
+                        "zone": "QNS",
+                        "address": "789 Queens Blvd, Queens, NY",
+                    },
+                    {
+                        "store_id": "store:BK-01",
+                        "store_name": "FreshMart Brooklyn 1",
+                        "zone": "BK",
+                        "address": "456 Brooklyn Ave, Brooklyn, NY",
+                    },
+                ]
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({"zone": "QNS"})
+
+                assert len(results) == 2
+                assert all(store["zone"] == "QNS" for store in results)
+                assert results[0]["store_id"] == "store:QNS-01"
+                assert results[1]["store_id"] == "store:QNS-02"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_stores_match_zone(self, mock_settings):
+        """Returns empty list when no stores match the zone filter."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = [
+                    {
+                        "store_id": "store:BK-01",
+                        "store_name": "FreshMart Brooklyn 1",
+                        "zone": "BK",
+                        "address": "456 Brooklyn Ave, Brooklyn, NY",
+                    },
+                ]
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({"zone": "MAN"})
+
+                assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_simplified_store_info(self, mock_settings):
+        """Returns only required fields for each store."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = [
+                    {
+                        "store_id": "store:QNS-01",
+                        "store_name": "FreshMart Queens 1",
+                        "zone": "QNS",
+                        "address": "123 Queens Blvd, Queens, NY",
+                        "extra_field": "should_be_ignored",
+                    },
+                ]
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({})
+
+                assert len(results) == 1
+                assert set(results[0].keys()) == {"store_id", "store_name", "zone", "address"}
+                assert "extra_field" not in results[0]
+
+    @pytest.mark.asyncio
+    async def test_handles_http_error(self, mock_settings):
+        """Returns empty list on HTTP error."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(
+                    side_effect=httpx.HTTPError("Connection failed")
+                )
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({})
+
+                assert results == []
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_response(self, mock_settings):
+        """Handles empty response from API gracefully."""
+        with patch("src.tools.tool_list_stores.get_settings", return_value=mock_settings):
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_response = MagicMock()
+                mock_response.json.return_value = []
+                mock_response.raise_for_status = MagicMock()
+
+                mock_client = AsyncMock()
+                mock_client.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client.__aexit__ = AsyncMock()
+                mock_client_class.return_value = mock_client
+
+                from src.tools.tool_list_stores import list_stores
+
+                results = await list_stores.ainvoke({})
+
+                assert results == []
+
+
 class TestCreateCustomer:
     """Tests for create_customer tool."""
 
