@@ -16,6 +16,7 @@ from src.tools import (
     fetch_order_context,
     get_ontology,
     get_store_health,
+    list_stores,
     manage_order_lines,
     search_inventory,
     search_orders,
@@ -34,6 +35,7 @@ class AgentState(TypedDict):
 # Tools
 TOOLS = [
     create_customer,
+    list_stores,
     search_inventory,
     create_order,
     manage_order_lines,
@@ -78,7 +80,8 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 ## Available Tools
 
 - create_customer: Create a new customer account (requires name)
-- search_inventory: Find products in a store's inventory
+- list_stores: List all stores with IDs and zone info (use FIRST when user mentions a store by name)
+- search_inventory: Find products in a store's inventory (requires correct store_id)
 - create_order: Create an order with confirmed items
 - manage_order_lines: Add, update, or delete products from an existing order
 - search_orders: Search existing orders
@@ -107,6 +110,12 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 4. Use manage_order_lines with action="delete" instead
 
 ## Workflow Guidelines
+
+**When searching inventory for a specific store:**
+1. If user mentions a store by name (e.g., "Queens store", "Manhattan location"), call list_stores FIRST
+2. Store IDs use abbreviated zone codes: MAN=Manhattan, BK=Brooklyn, QNS=Queens, BX=Bronx, SI=Staten Island
+3. Use the correct store_id from list_stores in your search_inventory call
+4. Example: "Queens store" → list_stores → find store:QNS-01 → search_inventory(store_id="store:QNS-01")
 
 **When helping staff create or modify orders:**
 1. Search for products by name or category using search_inventory
