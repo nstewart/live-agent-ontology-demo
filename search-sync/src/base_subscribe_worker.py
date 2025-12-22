@@ -688,8 +688,8 @@ class BaseSubscribeWorker(ABC):
         """Extract a human-readable display name from a document.
 
         Looks for common name fields based on document type:
-        - Inventory: product_name
-        - Orders: order_number or customer_name
+        - Inventory: product_name|store_name
+        - Orders: order_number
 
         Args:
             doc: Transformed document
@@ -700,8 +700,11 @@ class BaseSubscribeWorker(ABC):
         if not doc:
             return None
 
-        # Inventory items - use product name
+        # Inventory items - use product name and store name
         if doc.get("product_name"):
+            store_name = doc.get("store_name", "")
+            if store_name:
+                return f"{doc['product_name']} | {store_name}"
             return doc["product_name"]
 
         # Orders - use order number
