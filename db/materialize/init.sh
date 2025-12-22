@@ -1021,7 +1021,7 @@ LEFT JOIN active_task_counts atc ON atc.store_id = s.store_id;"
 echo "Creating courier dispatch indexes..."
 
 # Indexes for courier dispatch views
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS couriers_available_store_idx IN CLUSTER serving ON couriers_flat (home_store_id) WHERE courier_status = 'AVAILABLE';"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS couriers_available_store_idx IN CLUSTER serving ON couriers_flat (home_store_id, courier_status);"
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_courier_metrics_idx IN CLUSTER serving ON store_courier_metrics_mv (store_id);"
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_courier_metrics_zone_idx IN CLUSTER serving ON store_courier_metrics_mv (store_zone);"
 
