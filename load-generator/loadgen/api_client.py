@@ -438,3 +438,85 @@ class FreshMartAPIClient:
             }
         ]
         return await self.update_triples_batch(updates)
+
+    # =========================================================================
+    # Courier Dispatch (CQRS Queries)
+    # =========================================================================
+
+    async def get_available_couriers(
+        self, store_id: Optional[str] = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Get available couriers that can be assigned to orders.
+
+        Args:
+            store_id: Optional filter by home store
+            limit: Maximum number of results
+
+        Returns:
+            List of available courier objects
+        """
+        params = {"limit": limit}
+        if store_id:
+            params["store_id"] = store_id
+
+        response = await self._retry_request(
+            "get", "/freshmart/dispatch/couriers/available", params=params
+        )
+        return response.json()
+
+    async def get_orders_awaiting_courier(
+        self, store_id: Optional[str] = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Get orders awaiting courier assignment.
+
+        Args:
+            store_id: Optional filter by store
+            limit: Maximum number of results
+
+        Returns:
+            List of orders waiting for courier (FIFO)
+        """
+        params = {"limit": limit}
+        if store_id:
+            params["store_id"] = store_id
+
+        response = await self._retry_request(
+            "get", "/freshmart/dispatch/orders/awaiting-courier", params=params
+        )
+        return response.json()
+
+    async def get_tasks_ready_to_advance(
+        self, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Get delivery tasks where the timer has elapsed.
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            List of tasks ready to advance to next status
+        """
+        response = await self._retry_request(
+            "get", "/freshmart/dispatch/tasks/ready-to-advance", params={"limit": limit}
+        )
+        return response.json()
+
+    async def get_store_courier_metrics(
+        self, store_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Get courier metrics per store.
+
+        Args:
+            store_id: Optional filter by store
+
+        Returns:
+            List of store courier metrics
+        """
+        params = {}
+        if store_id:
+            params["store_id"] = store_id
+
+        response = await self._retry_request(
+            "get", "/freshmart/dispatch/metrics", params=params
+        )
+        return response.json()

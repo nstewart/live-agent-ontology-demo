@@ -10,9 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import get_settings
 from src.db.client import get_mz_session_factory, get_pg_session_factory
 from src.freshmart.models import (
+    CourierAvailable,
     CourierSchedule,
     CustomerInfo,
     OrderAtomicUpdate,
+    OrderAwaitingCourier,
     OrderFieldsUpdate,
     OrderFilter,
     OrderFlat,
@@ -20,8 +22,10 @@ from src.freshmart.models import (
     OrderLineFlat,
     OrderLineUpdate,
     ProductInfo,
+    StoreCourierMetrics,
     StoreInfo,
     StoreInventory,
+    TaskReadyToAdvance,
 )
 from src.freshmart.order_line_service import OrderLineService
 from src.freshmart.service import FreshMartService
@@ -485,3 +489,72 @@ async def delete_order_line_item(
     deleted = await service.delete_line_item(line_id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line item not found")
+
+
+# =============================================================================
+# Courier Dispatch (CQRS Read Endpoints)
+# =============================================================================
+
+
+@router.get("/dispatch/couriers/available", response_model=list[CourierAvailable])
+async def list_available_couriers(
+    store_id: Optional[str] = Query(default=None, description="Filter by home store"),
+    limit: int = Query(default=100, le=1000),
+    service: FreshMartService = Depends(get_freshmart_service),
+):
+    """
+    List available couriers that can be assigned to orders.
+
+    Returns couriers who are AVAILABLE and not currently assigned to an active task.
+    Used by the courier dispatch system to find couriers for new assignments.
+    """
+    return await service.list_available_couriers(store_id=store_id, limit=limit)
+
+
+@router.get("/dispatch/orders/awaiting-courier", response_model=list[OrderAwaitingCourier])
+async def list_orders_awaiting_courier(
+    store_id: Optional[str] = Query(default=None, description="Filter by store"),
+    limit: int = Query(default=100, le=1000),
+    service: FreshMartService = Depends(get_freshmart_service),
+):
+    """
+    List orders awaiting courier assignment.
+
+    Returns orders in CREATED status that don't have an active delivery task.
+    Orders are returned in FIFO order (oldest first).
+    """
+    return await service.list_orders_awaiting_courier(store_id=store_id, limit=limit)
+
+
+@router.get("/dispatch/tasks/ready-to-advance", response_model=list[TaskReadyToAdvance])
+async def list_tasks_ready_to_advance(
+    limit: int = Query(default=100, le=1000),
+    service: FreshMartService = Depends(get_freshmart_service),
+):
+    """
+    List delivery tasks where the timer has elapsed.
+
+    Returns tasks where:
+    - PICKING tasks with 2+ minutes elapsed -> ready to transition to DELIVERING
+    - DELIVERING tasks with 2+ minutes elapsed -> ready to complete
+
+    Uses mz_now() for real-time filtering in Materialize.
+    """
+    return await service.list_tasks_ready_to_advance(limit=limit)
+
+
+@router.get("/dispatch/metrics", response_model=list[StoreCourierMetrics])
+async def list_store_courier_metrics(
+    store_id: Optional[str] = Query(default=None, description="Filter by store"),
+    service: FreshMartService = Depends(get_freshmart_service),
+):
+    """
+    List courier metrics per store.
+
+    Returns operational metrics including:
+    - Available/busy/off-shift courier counts
+    - Orders in queue, picking, and delivering
+    - Estimated wait time
+    - Courier utilization percentage
+    """
+    return await service.list_store_courier_metrics(store_id=store_id)

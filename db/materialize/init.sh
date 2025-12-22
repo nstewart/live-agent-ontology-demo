@@ -95,6 +95,7 @@ SELECT
     MAX(CASE WHEN predicate = 'task_of_order' THEN object_value END) AS order_id,
     MAX(CASE WHEN predicate = 'assigned_to' THEN object_value END) AS assigned_courier_id,
     MAX(CASE WHEN predicate = 'task_status' THEN object_value END) AS task_status,
+    MAX(CASE WHEN predicate = 'task_started_at' THEN object_value END)::TIMESTAMPTZ AS task_started_at,
     MAX(CASE WHEN predicate = 'eta' THEN object_value END) AS eta,
     MAX(updated_at) AS effective_updated_at
 FROM triples
@@ -868,6 +869,161 @@ psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS i
 # Store capacity health indexes
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_capacity_health_idx IN CLUSTER serving ON store_capacity_health_mv (health_status, store_zone);"
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_capacity_store_idx IN CLUSTER serving ON store_capacity_health_mv (store_id);"
+
+# =============================================================================
+# COURIER DISPATCH VIEWS
+# These views support the courier-driven order fulfillment system where:
+# - Couriers handle both picking (2 min) and delivery (2 min)
+# - Orders queue up if no couriers are available
+# - Materialize incrementally maintains all courier/order state
+# =============================================================================
+
+echo "Creating courier dispatch views..."
+
+# View 1: Available couriers per store
+# Couriers who are AVAILABLE and not currently assigned to an active task
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS couriers_available AS
+SELECT
+    cf.courier_id,
+    cf.courier_name,
+    cf.home_store_id,
+    cf.vehicle_type,
+    cf.courier_status,
+    cf.effective_updated_at
+FROM couriers_flat cf
+WHERE cf.courier_status = 'AVAILABLE'
+  AND NOT EXISTS (
+    SELECT 1 FROM delivery_tasks_flat dt
+    WHERE dt.assigned_courier_id = cf.courier_id
+      AND dt.task_status IN ('PICKING', 'DELIVERING')
+  );"
+
+# View 2: Orders awaiting courier assignment
+# Orders in CREATED status that don't have an active delivery task
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS orders_awaiting_courier AS
+SELECT
+    o.order_id,
+    o.order_number,
+    o.store_id,
+    o.customer_id,
+    o.order_total_amount,
+    o.delivery_window_start,
+    o.delivery_window_end,
+    o.effective_updated_at AS created_at
+FROM orders_flat_mv o
+WHERE o.order_status = 'CREATED'
+  AND NOT EXISTS (
+    SELECT 1 FROM delivery_tasks_flat dt
+    WHERE dt.order_id = o.order_id
+      AND dt.task_status IN ('PICKING', 'DELIVERING')
+  );"
+
+# View 3: Active delivery tasks with timing info
+# Tasks currently being worked on, with expected completion time
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS delivery_tasks_active AS
+SELECT
+    dt.task_id,
+    dt.order_id,
+    dt.assigned_courier_id AS courier_id,
+    dt.task_status,
+    dt.task_started_at,
+    o.store_id,
+    o.customer_id,
+    cf.courier_name,
+    cf.vehicle_type,
+    -- Expected completion time: task_started_at + 2 minutes
+    dt.task_started_at + INTERVAL '2 minutes' AS expected_completion_at,
+    dt.effective_updated_at
+FROM delivery_tasks_flat dt
+JOIN orders_flat_mv o ON o.order_id = dt.order_id
+LEFT JOIN couriers_flat cf ON cf.courier_id = dt.assigned_courier_id
+WHERE dt.task_status IN ('PICKING', 'DELIVERING')
+  AND dt.task_started_at IS NOT NULL;"
+
+# View 4: Tasks ready to advance (timer elapsed)
+# Uses mz_now() for real-time filtering - tasks where 2 minutes have passed
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE VIEW IF NOT EXISTS tasks_ready_to_advance AS
+SELECT
+    task_id,
+    order_id,
+    courier_id,
+    task_status,
+    task_started_at,
+    store_id,
+    expected_completion_at
+FROM delivery_tasks_active
+WHERE expected_completion_at <= mz_now();"
+
+# Materialized View 5: Store courier metrics
+# Aggregated metrics per store for operational visibility
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+CREATE MATERIALIZED VIEW IF NOT EXISTS store_courier_metrics_mv IN CLUSTER compute AS
+WITH courier_counts AS (
+    SELECT
+        cf.home_store_id AS store_id,
+        COUNT(*) FILTER (WHERE cf.courier_status = 'AVAILABLE') AS available_couriers,
+        COUNT(*) FILTER (WHERE cf.courier_status IN ('PICKING', 'DELIVERING')) AS busy_couriers,
+        COUNT(*) FILTER (WHERE cf.courier_status = 'OFF_SHIFT') AS off_shift_couriers,
+        COUNT(*) AS total_couriers
+    FROM couriers_flat cf
+    GROUP BY cf.home_store_id
+),
+queue_counts AS (
+    SELECT
+        store_id,
+        COUNT(*) AS orders_in_queue
+    FROM orders_awaiting_courier
+    GROUP BY store_id
+),
+active_task_counts AS (
+    SELECT
+        store_id,
+        COUNT(*) FILTER (WHERE task_status = 'PICKING') AS orders_picking,
+        COUNT(*) FILTER (WHERE task_status = 'DELIVERING') AS orders_delivering
+    FROM delivery_tasks_active
+    GROUP BY store_id
+)
+SELECT
+    s.store_id,
+    s.store_name,
+    s.store_zone,
+    COALESCE(cc.total_couriers, 0)::INT AS total_couriers,
+    COALESCE(cc.available_couriers, 0)::INT AS available_couriers,
+    COALESCE(cc.busy_couriers, 0)::INT AS busy_couriers,
+    COALESCE(cc.off_shift_couriers, 0)::INT AS off_shift_couriers,
+    COALESCE(qc.orders_in_queue, 0)::INT AS orders_in_queue,
+    COALESCE(atc.orders_picking, 0)::INT AS orders_picking,
+    COALESCE(atc.orders_delivering, 0)::INT AS orders_delivering,
+    -- Estimated wait time in minutes: (queue_depth / available_couriers) * 4 min per order
+    -- 4 minutes = 2 min picking + 2 min delivery
+    CASE
+        WHEN COALESCE(cc.available_couriers, 0) = 0 AND COALESCE(qc.orders_in_queue, 0) > 0
+        THEN -1  -- Infinite wait (no couriers)
+        WHEN COALESCE(cc.available_couriers, 0) = 0
+        THEN 0   -- No queue, no couriers
+        ELSE ROUND((COALESCE(qc.orders_in_queue, 0)::DECIMAL / cc.available_couriers) * 4, 1)
+    END AS estimated_wait_minutes,
+    -- Courier utilization percentage
+    CASE
+        WHEN COALESCE(cc.total_couriers, 0) = 0 THEN 0
+        ELSE ROUND((COALESCE(cc.busy_couriers, 0)::DECIMAL / cc.total_couriers) * 100, 1)
+    END AS courier_utilization_pct,
+    s.effective_updated_at
+FROM stores_flat s
+LEFT JOIN courier_counts cc ON cc.store_id = s.store_id
+LEFT JOIN queue_counts qc ON qc.store_id = s.store_id
+LEFT JOIN active_task_counts atc ON atc.store_id = s.store_id;"
+
+echo "Creating courier dispatch indexes..."
+
+# Indexes for courier dispatch views
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS couriers_available_store_idx IN CLUSTER serving ON couriers_flat (home_store_id) WHERE courier_status = 'AVAILABLE';"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_courier_metrics_idx IN CLUSTER serving ON store_courier_metrics_mv (store_id);"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS store_courier_metrics_zone_idx IN CLUSTER serving ON store_courier_metrics_mv (store_zone);"
 
 echo "Verifying three-tier setup..."
 echo ""
