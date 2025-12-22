@@ -289,4 +289,4 @@ class CourierDispatchScenario:
             },
         ]
 
-        await self.api_client.create_triples_batch(triples)
+        await self.api_client.update_triples_batch(triples)
