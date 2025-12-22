@@ -113,7 +113,7 @@ class CourierDispatchScenario:
                 try:
                     if current_status == "PICKING":
                         # Transition to DELIVERING
-                        await self._transition_to_delivering(task_id, order_id)
+                        await self._transition_to_delivering(task_id, order_id, courier_id)
                         advanced["to_delivering"] += 1
                         advanced["total"] += 1
                         logger.debug(f"Task {task_id}: PICKING -> DELIVERING")
@@ -133,7 +133,7 @@ class CourierDispatchScenario:
 
         return advanced
 
-    async def _transition_to_delivering(self, task_id: str, order_id: str):
+    async def _transition_to_delivering(self, task_id: str, order_id: str, courier_id: str):
         """Transition task from PICKING to DELIVERING."""
         now = datetime.now(timezone.utc).isoformat()
 
@@ -154,6 +154,12 @@ class CourierDispatchScenario:
                 "subject_id": order_id,
                 "predicate": "order_status",
                 "object_value": "OUT_FOR_DELIVERY",
+                "object_type": "string",
+            },
+            {
+                "subject_id": courier_id,
+                "predicate": "courier_status",
+                "object_value": "DELIVERING",
                 "object_type": "string",
             },
         ]
