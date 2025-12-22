@@ -174,14 +174,7 @@ export default function CouriersSchedulePage() {
         utilization_pct: utilization,
         health_status: health,
       }
-    }).sort((a, b) => {
-      // Sort by health status (CRITICAL first), then by name
-      const healthOrder = { CRITICAL: 0, WARNING: 1, HEALTHY: 2 }
-      if (healthOrder[a.health_status] !== healthOrder[b.health_status]) {
-        return healthOrder[a.health_status] - healthOrder[b.health_status]
-      }
-      return a.store_name.localeCompare(b.store_name)
-    })
+    }).sort((a, b) => a.store_name.localeCompare(b.store_name))
   }, [storesData, couriersData, ordersData])
 
   // Map couriers data (already sorted by Zero)
