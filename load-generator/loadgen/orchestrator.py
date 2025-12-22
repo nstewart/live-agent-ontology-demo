@@ -13,6 +13,7 @@ from loadgen.config import LoadProfile
 from loadgen.data_generators import DataGenerator
 from loadgen.metrics import MetricsTracker
 from loadgen.scenarios import (
+    CourierDispatchScenario,
     CustomerScenario,
     InventoryScenario,
     OrderCreationScenario,
@@ -60,10 +61,14 @@ class LoadOrchestrator:
         self.customer_scenario = CustomerScenario(
             self.api_client, self.data_generator
         )
+        self.dispatch_scenario = CourierDispatchScenario(self.api_client)
 
         # Control flags
         self.running = False
         self.stop_requested = False
+
+        # Dispatch configuration
+        self.dispatch_interval_seconds = 2.0  # Run dispatch every 2 seconds
 
     async def initialize(self):
         """Initialize orchestrator and scenarios."""
@@ -81,6 +86,7 @@ class LoadOrchestrator:
         await self.order_scenario.initialize()
         await self.inventory_scenario.initialize()
         await self.customer_scenario.initialize()
+        await self.dispatch_scenario.initialize()
 
         logger.info("Load orchestrator initialized successfully")
 
@@ -129,9 +135,12 @@ class LoadOrchestrator:
                 result = await self.order_scenario.execute()
                 metric_type = "order"
             elif activity_type == "transition":
-                result = await self.lifecycle_scenario.execute(force_cancellation=False)
-                metric_type = "transition"
+                # With courier dispatch, status transitions happen automatically.
+                # Redirect this activity to create more orders (feeds the courier system).
+                result = await self.order_scenario.execute()
+                metric_type = "order"
             elif activity_type == "cancellation":
+                # Cancel orders that are still in CREATED status (before courier pickup)
                 result = await self.lifecycle_scenario.execute(force_cancellation=True)
                 metric_type = "cancellation"
             elif activity_type == "customer":
@@ -141,9 +150,9 @@ class LoadOrchestrator:
                 result = await self.inventory_scenario.execute()
                 metric_type = "inventory"
             elif activity_type == "modification":
-                # For now, treat modifications like status transitions
-                result = await self.lifecycle_scenario.execute(force_cancellation=False)
-                metric_type = "transition"
+                # With courier dispatch, order modifications are redirected to new orders.
+                result = await self.order_scenario.execute()
+                metric_type = "order"
             else:
                 result = {"success": False, "error": f"Unknown activity: {activity_type}"}
                 metric_type = "other"
@@ -229,6 +238,60 @@ class LoadOrchestrator:
             # Reset windowed metrics
             self.metrics.reset_window()
 
+    async def courier_dispatcher(self):
+        """Background task that runs courier dispatch cycles.
+
+        This task:
+        1. Advances tasks where the timer has elapsed (PICKING->DELIVERING, DELIVERING->COMPLETED)
+        2. Assigns available couriers to pending orders
+
+        Runs every dispatch_interval_seconds (default 2 seconds).
+        """
+        logger.info(
+            f"Courier dispatcher started (interval: {self.dispatch_interval_seconds}s)"
+        )
+
+        while self.running and not self.stop_requested:
+            try:
+                start_time = time.time()
+                result = await self.dispatch_scenario.execute()
+
+                # Log dispatch activity if anything happened
+                total_actions = (
+                    result.get("tasks_advanced", 0) + result.get("assignments_made", 0)
+                )
+                if total_actions > 0:
+                    logger.debug(
+                        f"Dispatch cycle: {result.get('assignments_made', 0)} assigned, "
+                        f"{result.get('deliveries_started', 0)} delivering, "
+                        f"{result.get('deliveries_completed', 0)} completed"
+                    )
+
+                # Record metrics for dispatch activity
+                latency = time.time() - start_time
+                if result.get("assignments_made", 0) > 0:
+                    for _ in range(result["assignments_made"]):
+                        self.metrics.record_activity(
+                            success=True,
+                            latency=latency,
+                            activity_type="dispatch_assign",
+                        )
+                if result.get("deliveries_completed", 0) > 0:
+                    for _ in range(result["deliveries_completed"]):
+                        self.metrics.record_activity(
+                            success=True,
+                            latency=latency,
+                            activity_type="dispatch_complete",
+                        )
+
+            except Exception as e:
+                logger.error(f"Dispatch cycle error: {e}")
+
+            # Wait before next cycle
+            await asyncio.sleep(self.dispatch_interval_seconds)
+
+        logger.debug("Courier dispatcher stopped")
+
     async def run(self, duration_minutes: Optional[int] = None):
         """Run load generation.
 
@@ -277,6 +340,7 @@ class LoadOrchestrator:
         # Start support tasks
         rate_task = asyncio.create_task(self.rate_controller())
         metrics_task = asyncio.create_task(self.metrics_reporter())
+        dispatch_task = asyncio.create_task(self.courier_dispatcher())
 
         try:
             if duration:
@@ -305,11 +369,13 @@ class LoadOrchestrator:
             self.stop_requested = True
 
             # Cancel all tasks
-            for task in workers + [rate_task, metrics_task]:
+            for task in workers + [rate_task, metrics_task, dispatch_task]:
                 task.cancel()
 
             # Wait for workers to finish with timeout
-            await asyncio.gather(*workers, rate_task, metrics_task, return_exceptions=True)
+            await asyncio.gather(
+                *workers, rate_task, metrics_task, dispatch_task, return_exceptions=True
+            )
 
             # Cleanup
             await self.cleanup()

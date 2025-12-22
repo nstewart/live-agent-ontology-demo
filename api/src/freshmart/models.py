@@ -198,3 +198,62 @@ class OrderAtomicUpdate(BaseModel):
         default_factory=list,
         description="Complete list of desired line items (replaces all existing)",
     )
+
+
+# =============================================================================
+# Courier Dispatch Models (CQRS Views)
+# =============================================================================
+
+
+class CourierAvailable(BaseModel):
+    """Available courier from couriers_available view."""
+
+    courier_id: str
+    courier_name: Optional[str] = None
+    home_store_id: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    courier_status: Optional[str] = None
+    effective_updated_at: Optional[datetime] = None
+
+
+class OrderAwaitingCourier(BaseModel):
+    """Order awaiting courier assignment from orders_awaiting_courier view."""
+
+    order_id: str
+    order_number: Optional[str] = None
+    store_id: Optional[str] = None
+    customer_id: Optional[str] = None
+    order_total_amount: Optional[Decimal] = None
+    delivery_window_start: Optional[str] = None
+    delivery_window_end: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class TaskReadyToAdvance(BaseModel):
+    """Delivery task ready to advance from tasks_ready_to_advance view."""
+
+    task_id: str
+    order_id: Optional[str] = None
+    courier_id: Optional[str] = None
+    task_status: Optional[str] = None
+    task_started_at: Optional[datetime] = None
+    store_id: Optional[str] = None
+    expected_completion_at: Optional[datetime] = None
+
+
+class StoreCourierMetrics(BaseModel):
+    """Store courier metrics from store_courier_metrics_mv view."""
+
+    store_id: str
+    store_name: Optional[str] = None
+    store_zone: Optional[str] = None
+    total_couriers: int = 0
+    available_couriers: int = 0
+    busy_couriers: int = 0
+    off_shift_couriers: int = 0
+    orders_in_queue: int = 0
+    orders_picking: int = 0
+    orders_delivering: int = 0
+    estimated_wait_minutes: Optional[float] = None
+    courier_utilization_pct: Optional[float] = None
+    effective_updated_at: Optional[datetime] = None

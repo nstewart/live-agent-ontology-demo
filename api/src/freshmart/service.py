@@ -7,11 +7,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.freshmart.models import (
+    CourierAvailable,
     CourierSchedule,
+    OrderAwaitingCourier,
     OrderFilter,
     OrderFlat,
+    StoreCourierMetrics,
     StoreInfo,
     StoreInventory,
+    TaskReadyToAdvance,
 )
 
 
@@ -557,3 +561,196 @@ class FreshMartService:
             tasks=tasks,
             effective_updated_at=row.effective_updated_at,
         )
+
+    # =========================================================================
+    # Courier Dispatch (CQRS Views)
+    # =========================================================================
+
+    async def list_available_couriers(
+        self,
+        store_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[CourierAvailable]:
+        """List available couriers from the couriers_available view.
+
+        Args:
+            store_id: Optional filter by home store
+            limit: Maximum number of results
+
+        Returns:
+            List of available couriers
+        """
+        conditions = []
+        params: dict = {"limit": limit}
+
+        if store_id:
+            conditions.append("home_store_id = :store_id")
+            params["store_id"] = store_id
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT courier_id, courier_name, home_store_id, vehicle_type,
+                   courier_status, effective_updated_at
+            FROM couriers_available
+            {where_clause}
+            ORDER BY effective_updated_at
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            CourierAvailable(
+                courier_id=row.courier_id,
+                courier_name=row.courier_name,
+                home_store_id=row.home_store_id,
+                vehicle_type=row.vehicle_type,
+                courier_status=row.courier_status,
+                effective_updated_at=row.effective_updated_at,
+            )
+            for row in rows
+        ]
+
+    async def list_orders_awaiting_courier(
+        self,
+        store_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[OrderAwaitingCourier]:
+        """List orders awaiting courier assignment.
+
+        Args:
+            store_id: Optional filter by store
+            limit: Maximum number of results
+
+        Returns:
+            List of orders waiting for courier (FIFO by creation time)
+        """
+        conditions = []
+        params: dict = {"limit": limit}
+
+        if store_id:
+            conditions.append("store_id = :store_id")
+            params["store_id"] = store_id
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT order_id, order_number, store_id, customer_id,
+                   order_total_amount, delivery_window_start, delivery_window_end,
+                   created_at
+            FROM orders_awaiting_courier
+            {where_clause}
+            ORDER BY created_at
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            OrderAwaitingCourier(
+                order_id=row.order_id,
+                order_number=row.order_number,
+                store_id=row.store_id,
+                customer_id=row.customer_id,
+                order_total_amount=row.order_total_amount,
+                delivery_window_start=row.delivery_window_start,
+                delivery_window_end=row.delivery_window_end,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    async def list_tasks_ready_to_advance(
+        self,
+        limit: int = 100,
+    ) -> list[TaskReadyToAdvance]:
+        """List delivery tasks where the timer has elapsed.
+
+        Uses mz_now() in the view to filter tasks that are ready.
+
+        Args:
+            limit: Maximum number of results
+
+        Returns:
+            List of tasks ready to advance to next status
+        """
+        query = """
+            SELECT task_id, order_id, courier_id, task_status,
+                   task_started_at, store_id, expected_completion_at
+            FROM tasks_ready_to_advance
+            ORDER BY expected_completion_at
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(text(query), {"limit": limit})
+        rows = result.fetchall()
+
+        return [
+            TaskReadyToAdvance(
+                task_id=row.task_id,
+                order_id=row.order_id,
+                courier_id=row.courier_id,
+                task_status=row.task_status,
+                task_started_at=row.task_started_at,
+                store_id=row.store_id,
+                expected_completion_at=row.expected_completion_at,
+            )
+            for row in rows
+        ]
+
+    async def list_store_courier_metrics(
+        self,
+        store_id: Optional[str] = None,
+    ) -> list[StoreCourierMetrics]:
+        """List store courier metrics.
+
+        Args:
+            store_id: Optional filter by store
+
+        Returns:
+            List of store courier metrics
+        """
+        conditions = []
+        params: dict = {}
+
+        if store_id:
+            conditions.append("store_id = :store_id")
+            params["store_id"] = store_id
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        query = f"""
+            SELECT store_id, store_name, store_zone,
+                   total_couriers, available_couriers, busy_couriers,
+                   off_shift_couriers, orders_in_queue, orders_picking,
+                   orders_delivering, estimated_wait_minutes,
+                   courier_utilization_pct, effective_updated_at
+            FROM store_courier_metrics_mv
+            {where_clause}
+            ORDER BY store_name
+        """
+
+        result = await self.session.execute(text(query), params)
+        rows = result.fetchall()
+
+        return [
+            StoreCourierMetrics(
+                store_id=row.store_id,
+                store_name=row.store_name,
+                store_zone=row.store_zone,
+                total_couriers=row.total_couriers or 0,
+                available_couriers=row.available_couriers or 0,
+                busy_couriers=row.busy_couriers or 0,
+                off_shift_couriers=row.off_shift_couriers or 0,
+                orders_in_queue=row.orders_in_queue or 0,
+                orders_picking=row.orders_picking or 0,
+                orders_delivering=row.orders_delivering or 0,
+                estimated_wait_minutes=row.estimated_wait_minutes,
+                courier_utilization_pct=row.courier_utilization_pct,
+                effective_updated_at=row.effective_updated_at,
+            )
+            for row in rows
+        ]

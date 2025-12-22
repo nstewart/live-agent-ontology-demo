@@ -278,8 +278,14 @@ FROM ontology_classes WHERE class_name = 'Courier'
 ON CONFLICT (prop_name) DO NOTHING;
 
 INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
-SELECT 'courier_status', id, 'string', NULL, FALSE, TRUE, 'Courier status (OFF_SHIFT, AVAILABLE, ON_DELIVERY)'
+SELECT 'courier_status', id, 'string', NULL, FALSE, TRUE, 'Courier status (OFF_SHIFT, AVAILABLE, PICKING, DELIVERING)'
 FROM ontology_classes WHERE class_name = 'Courier'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'current_task', c.id, 'entity_ref', dt.id, FALSE, FALSE, 'Current delivery task the courier is working on'
+FROM ontology_classes c, ontology_classes dt
+WHERE c.class_name = 'Courier' AND dt.class_name = 'DeliveryTask'
 ON CONFLICT (prop_name) DO NOTHING;
 
 -- DeliveryTask properties
@@ -296,7 +302,12 @@ WHERE dt.class_name = 'DeliveryTask' AND c.class_name = 'Courier'
 ON CONFLICT (prop_name) DO NOTHING;
 
 INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
-SELECT 'task_status', id, 'string', NULL, FALSE, TRUE, 'Task status (PENDING, ASSIGNED, IN_PROGRESS, COMPLETED, FAILED)'
+SELECT 'task_status', id, 'string', NULL, FALSE, TRUE, 'Task status (PICKING, DELIVERING, COMPLETED, FAILED, CANCELLED)'
+FROM ontology_classes WHERE class_name = 'DeliveryTask'
+ON CONFLICT (prop_name) DO NOTHING;
+
+INSERT INTO ontology_properties (prop_name, domain_class_id, range_kind, range_class_id, is_multi_valued, is_required, description)
+SELECT 'task_started_at', id, 'timestamp', NULL, FALSE, FALSE, 'When the current task phase started (for timing task completion)'
 FROM ontology_classes WHERE class_name = 'DeliveryTask'
 ON CONFLICT (prop_name) DO NOTHING;
 

@@ -31,70 +31,56 @@ class OrderLifecycleScenario:
     async def execute(self, force_cancellation: bool = False) -> dict[str, Any]:
         """Execute order lifecycle scenario.
 
+        With courier dispatch enabled, this scenario only handles cancellations.
+        Orders can only be cancelled while in CREATED status (before courier pickup).
+        Status transitions (PICKING -> DELIVERING -> COMPLETED) are handled by
+        the courier dispatch system automatically.
+
         Args:
-            force_cancellation: If True, force cancellation instead of transition
+            force_cancellation: If True, attempt to cancel an order
 
         Returns:
-            Result dictionary with transition details
+            Result dictionary with action details
         """
-        # Fetch orders that can transition
-        transitionable_statuses = ["CREATED", "PICKING", "OUT_FOR_DELIVERY"]
-        status = random.choice(transitionable_statuses)
+        # With courier dispatch, we only cancel orders in CREATED status
+        # (before they're picked up by a courier)
+        if force_cancellation:
+            try:
+                # Only get orders in CREATED status - these can be cancelled
+                orders = await self.api_client.get_orders(status="CREATED", limit=100)
 
-        try:
-            orders = await self.api_client.get_orders(status=status, limit=100)
+                if not orders:
+                    return {
+                        "success": False,
+                        "error": "No orders in CREATED status to cancel",
+                    }
 
-            if not orders:
-                return {
-                    "success": False,
-                    "error": f"No orders found in status {status}",
-                }
+                # Select a random order to cancel
+                order = random.choice(orders)
+                order_id = order["order_id"]
 
-            # Select a random order
-            order = random.choice(orders)
-            order_id = order["order_id"]
-
-            # Check if order should be cancelled (forced or random)
-            if force_cancellation or self.data_generator.should_cancel_order(status):
+                # Cancel the order
                 await self.api_client.update_order_status(order_id, "CANCELLED")
-                logger.debug(f"Cancelled order {order_id} (was {status})")
+                logger.debug(f"Cancelled order {order_id} (was CREATED)")
                 return {
                     "success": True,
                     "order_id": order_id,
-                    "old_status": status,
+                    "old_status": "CREATED",
                     "new_status": "CANCELLED",
                     "action": "cancelled",
                 }
 
-            # Calculate order age (approximate from current time)
-            # Note: In a real scenario, we'd parse the order creation timestamp
-            # For load generation, we'll use random age
-            order_age_minutes = random.uniform(0, 60)
-
-            # Check if order should transition
-            should_transition, new_status = (
-                self.data_generator.should_transition_status(status, order_age_minutes)
-            )
-
-            if should_transition and new_status:
-                await self.api_client.update_order_status(order_id, new_status)
-                logger.debug(f"Transitioned order {order_id}: {status} -> {new_status}")
-                return {
-                    "success": True,
-                    "order_id": order_id,
-                    "old_status": status,
-                    "new_status": new_status,
-                    "action": "transitioned",
-                }
-            else:
+            except Exception as e:
+                logger.error(f"Failed to cancel order: {e}")
                 return {
                     "success": False,
-                    "error": "Order not ready for transition",
+                    "error": str(e),
                 }
-
-        except Exception as e:
-            logger.error(f"Failed to transition order: {e}")
+        else:
+            # Without force_cancellation, this is a no-op since courier dispatch
+            # handles all status transitions automatically
             return {
-                "success": False,
-                "error": str(e),
+                "success": True,
+                "action": "noop",
+                "message": "Status transitions handled by courier dispatch",
             }
