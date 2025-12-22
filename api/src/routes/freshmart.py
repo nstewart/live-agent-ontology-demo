@@ -499,7 +499,7 @@ async def delete_order_line_item(
 @router.get("/dispatch/couriers/available", response_model=list[CourierAvailable])
 async def list_available_couriers(
     store_id: Optional[str] = Query(default=None, description="Filter by home store"),
-    limit: int = Query(default=100, le=1000),
+    limit: int = Query(default=100, ge=1, le=1000),
     service: FreshMartService = Depends(get_freshmart_service),
 ):
     """
@@ -514,7 +514,7 @@ async def list_available_couriers(
 @router.get("/dispatch/orders/awaiting-courier", response_model=list[OrderAwaitingCourier])
 async def list_orders_awaiting_courier(
     store_id: Optional[str] = Query(default=None, description="Filter by store"),
-    limit: int = Query(default=100, le=1000),
+    limit: int = Query(default=100, ge=1, le=1000),
     service: FreshMartService = Depends(get_freshmart_service),
 ):
     """
@@ -528,15 +528,15 @@ async def list_orders_awaiting_courier(
 
 @router.get("/dispatch/tasks/ready-to-advance", response_model=list[TaskReadyToAdvance])
 async def list_tasks_ready_to_advance(
-    limit: int = Query(default=100, le=1000),
+    limit: int = Query(default=100, ge=1, le=1000),
     service: FreshMartService = Depends(get_freshmart_service),
 ):
     """
     List delivery tasks where the timer has elapsed.
 
     Returns tasks where:
-    - PICKING tasks with 2+ minutes elapsed -> ready to transition to DELIVERING
-    - DELIVERING tasks with 2+ minutes elapsed -> ready to complete
+    - PICKING tasks with 5+ seconds elapsed -> ready to transition to DELIVERING
+    - DELIVERING tasks with 5+ seconds elapsed -> ready to complete
 
     Uses mz_now() for real-time filtering in Materialize.
     """

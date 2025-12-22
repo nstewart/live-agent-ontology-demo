@@ -998,14 +998,14 @@ SELECT
     COALESCE(qc.orders_in_queue, 0)::INT AS orders_in_queue,
     COALESCE(atc.orders_picking, 0)::INT AS orders_picking,
     COALESCE(atc.orders_delivering, 0)::INT AS orders_delivering,
-    -- Estimated wait time in seconds: (queue_depth / available_couriers) * 10 sec per order
+    -- Estimated wait time in minutes: (queue_depth / available_couriers) * 10 sec per order
     -- 10 seconds = 5 sec picking + 5 sec delivery
     CASE
         WHEN COALESCE(cc.available_couriers, 0) = 0 AND COALESCE(qc.orders_in_queue, 0) > 0
         THEN -1  -- Infinite wait (no couriers)
         WHEN COALESCE(cc.available_couriers, 0) = 0
         THEN 0   -- No queue, no couriers
-        ELSE ROUND((COALESCE(qc.orders_in_queue, 0)::DECIMAL / cc.available_couriers) * 4, 1)
+        ELSE ROUND((COALESCE(qc.orders_in_queue, 0)::DECIMAL / cc.available_couriers) * (10.0 / 60.0), 1)
     END AS estimated_wait_minutes,
     -- Courier utilization percentage
     CASE
