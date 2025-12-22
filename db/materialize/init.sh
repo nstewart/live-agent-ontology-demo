@@ -934,8 +934,8 @@ SELECT
     o.customer_id,
     cf.courier_name,
     cf.vehicle_type,
-    -- Expected completion time: task_started_at + 2 minutes
-    dt.task_started_at + INTERVAL '2 minutes' AS expected_completion_at,
+    -- Expected completion time: task_started_at + 5 seconds
+    dt.task_started_at + INTERVAL '5 seconds' AS expected_completion_at,
     dt.effective_updated_at
 FROM delivery_tasks_flat dt
 JOIN orders_flat_mv o ON o.order_id = dt.order_id
@@ -998,8 +998,8 @@ SELECT
     COALESCE(qc.orders_in_queue, 0)::INT AS orders_in_queue,
     COALESCE(atc.orders_picking, 0)::INT AS orders_picking,
     COALESCE(atc.orders_delivering, 0)::INT AS orders_delivering,
-    -- Estimated wait time in minutes: (queue_depth / available_couriers) * 4 min per order
-    -- 4 minutes = 2 min picking + 2 min delivery
+    -- Estimated wait time in seconds: (queue_depth / available_couriers) * 10 sec per order
+    -- 10 seconds = 5 sec picking + 5 sec delivery
     CASE
         WHEN COALESCE(cc.available_couriers, 0) = 0 AND COALESCE(qc.orders_in_queue, 0) > 0
         THEN -1  -- Infinite wait (no couriers)

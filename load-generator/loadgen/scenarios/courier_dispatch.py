@@ -16,8 +16,8 @@ from loadgen.api_client import FreshMartAPIClient
 logger = logging.getLogger(__name__)
 
 # Task timing configuration (in seconds)
-PICKING_DURATION_SECONDS = 120  # 2 minutes
-DELIVERY_DURATION_SECONDS = 120  # 2 minutes
+PICKING_DURATION_SECONDS = 5  # 5 seconds
+DELIVERY_DURATION_SECONDS = 5  # 5 seconds
 
 
 class CourierDispatchScenario:
