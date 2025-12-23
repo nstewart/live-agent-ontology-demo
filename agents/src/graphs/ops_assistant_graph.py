@@ -17,6 +17,7 @@ from src.tools import (
     fetch_order_context,
     get_ontology,
     get_store_health,
+    list_couriers,
     list_stores,
     manage_order_lines,
     search_inventory,
@@ -37,6 +38,7 @@ class AgentState(TypedDict):
 TOOLS = [
     create_customer,
     list_stores,
+    list_couriers,
     search_inventory,
     create_order,
     manage_order_lines,
@@ -72,6 +74,7 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 - Check stock levels across different stores
 - Update order statuses as they're being picked/packed
 - View delivery task assignments
+- Check courier availability and workload by store
 
 **For Administrators:**
 - Create new customer accounts
@@ -82,6 +85,7 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 
 - create_customer: Create a new customer account (requires name)
 - list_stores: List all stores with IDs and zone info (use FIRST when user mentions a store by name)
+- list_couriers: List couriers with status and task info (can filter by store_id or status)
 - search_inventory: Find products in a store's inventory (requires correct store_id)
 - create_order: Create an order with confirmed items
 - manage_order_lines: Add, update, or delete products from an existing order
