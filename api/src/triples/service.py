@@ -173,8 +173,15 @@ class TripleService:
             updated_at=row.updated_at,
         )
 
-    async def create_triples_batch(self, triples: list[TripleCreate]) -> list[Triple]:
-        """Create multiple triples in a batch."""
+    async def create_triples_batch(
+        self, triples: list[TripleCreate], batch_id: Optional[str] = None
+    ) -> list[Triple]:
+        """Create multiple triples in a batch.
+
+        Args:
+            triples: List of triples to create
+            batch_id: Optional batch ID for audit grouping. If not provided, generates a new one.
+        """
         logger.info(f"[BATCH INSERT] Creating {len(triples)} new triples")
 
         # Log transaction start with summary of what's being written
@@ -260,7 +267,7 @@ class TripleService:
 
         # Emit write events to audit store
         write_store = get_write_store()
-        batch_id = generate_batch_id()
+        effective_batch_id = batch_id if batch_id else generate_batch_id()
         write_events = []
         for triple in triples:
             write_events.append(WriteEvent(
@@ -269,14 +276,16 @@ class TripleService:
                 old_value=None,  # INSERT - no old value
                 new_value=triple.object_value,
                 operation="INSERT",
-                batch_id=batch_id,
+                batch_id=effective_batch_id,
             ))
         if write_events:
             write_store.add_events(write_events)
 
         return created
 
-    async def upsert_triples_batch(self, triples: list[TripleCreate]) -> list[Triple]:
+    async def upsert_triples_batch(
+        self, triples: list[TripleCreate], batch_id: Optional[str] = None
+    ) -> list[Triple]:
         """Upsert multiple triples in a batch - deletes old values and inserts new ones atomically.
 
         For each (subject_id, predicate) pair, this will:
@@ -284,6 +293,10 @@ class TripleService:
         2. Insert the new triple with the new object_value
 
         All operations happen in a single SQL transaction.
+
+        Args:
+            triples: List of triples to upsert
+            batch_id: Optional batch ID for audit grouping. If not provided, generates a new one.
         """
         # Validate subject_id format
         for triple in triples:
@@ -402,7 +415,7 @@ class TripleService:
 
         # Emit write events to audit store
         write_store = get_write_store()
-        batch_id = generate_batch_id()
+        effective_batch_id = batch_id if batch_id else generate_batch_id()
         write_events = []
         for triple in triples:
             old_value = existing_values.get((triple.subject_id, triple.predicate))
@@ -413,7 +426,7 @@ class TripleService:
                 old_value=old_value,
                 new_value=triple.object_value,
                 operation=operation,
-                batch_id=batch_id,
+                batch_id=effective_batch_id,
             ))
         if write_events:
             write_store.add_events(write_events)
