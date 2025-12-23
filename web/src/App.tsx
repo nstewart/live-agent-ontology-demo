@@ -26,8 +26,8 @@ import PropagationWidget from './components/PropagationWidget'
 import ChatWidget from './components/ChatWidget'
 
 const navItems = [
-  { path: '/', icon: TrendingUp, label: 'Live Metrics' },
-  { path: '/query-stats', icon: BarChart3, label: 'IVM Demo' },
+  { path: '/', icon: BarChart3, label: 'IVM Demo' },
+  { path: '/metrics', icon: TrendingUp, label: 'Live Metrics' },
   { path: '/orders', icon: ShoppingCart, label: 'Orders' },
   { path: '/stores', icon: Warehouse, label: 'Stores & Inventory' },
   { path: '/couriers', icon: Truck, label: 'Couriers' },
@@ -72,8 +72,8 @@ function App() {
             {/* Main content */}
             <main className="flex-1 overflow-auto pb-10">
               <Routes>
-                <Route path="/" element={<MetricsDashboardPage />} />
-                <Route path="/query-stats" element={<QueryStatisticsPage />} />
+                <Route path="/" element={<QueryStatisticsPage />} />
+                <Route path="/metrics" element={<MetricsDashboardPage />} />
                 <Route path="/orders" element={<OrdersDashboardPage />} />
                 <Route path="/stores" element={<StoresInventoryPage />} />
                 <Route path="/couriers" element={<CouriersSchedulePage />} />
