@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronUp, ChevronDown, ChevronRight, Loader2, Trash2, Database } from 'lucide-react';
+import { ChevronUp, ChevronDown, ChevronRight, Trash2, Database } from 'lucide-react';
 import { usePropagation, PropagationEvent, SourceWriteEvent } from '../contexts/PropagationContext';
 
 function formatTime(timestamp: number): string {
@@ -248,7 +248,6 @@ function SourceWriteItem({ write }: { write: SourceWriteEvent }) {
 }
 
 function SourceWriteBatch({
-  batchId,
   writes,
   isExpanded,
   onToggle

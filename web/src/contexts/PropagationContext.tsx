@@ -59,7 +59,7 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
   const [writes, setWrites] = useState<WriteRecord[]>([]);
   const [events, setEvents] = useState<PropagationEvent[]>([]);
   const [sourceWrites, setSourceWrites] = useState<SourceWriteEvent[]>([]);
-  const [isPolling, setIsPolling] = useState(true); // Always polling
+  const [isPolling] = useState(true); // Always polling
   const lastMzTs = useRef<string | null>(null);
   const lastWriteTs = useRef<number | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
