@@ -281,22 +281,31 @@ export default function QueryStatisticsPage() {
       // Update chart data with the latest reaction times
       const history = historyRes.data as QueryStatsHistoryResponse;
       const now = Date.now();
-      const maxSamples = 1800; // 3 minutes at 100ms intervals
+      const maxSamples = 1800; // 3 minutes worth of chart points
 
       // Build chart data from history
+      // Each source has different sample counts due to different QPS rates
       const pgTimes = history.postgresql_view?.reaction_times || [];
       const batchTimes = history.batch_cache?.reaction_times || [];
       const mzTimes = history.materialize?.reaction_times || [];
 
-      const maxLen = Math.max(pgTimes.length, batchTimes.length, mzTimes.length);
+      // Use a fixed number of chart points and sample from each array
+      // This normalizes the different sample rates to a common time axis
+      const chartPoints = Math.min(maxSamples, 180); // 180 points = 1 per second for 3 minutes
       const newChartData: ChartDataPoint[] = [];
 
-      for (let i = 0; i < maxLen; i++) {
+      for (let i = 0; i < chartPoints; i++) {
+        // Calculate the proportional index for each source array
+        // This aligns all sources to the same time axis (most recent on the right)
+        const pgIdx = Math.floor((i / chartPoints) * pgTimes.length);
+        const batchIdx = Math.floor((i / chartPoints) * batchTimes.length);
+        const mzIdx = Math.floor((i / chartPoints) * mzTimes.length);
+
         newChartData.push({
-          time: now - (maxLen - i - 1) * 100, // Approximate timestamps (100ms intervals)
-          postgresql: pgTimes[i] ?? null,
-          batch: batchTimes[i] ?? null,
-          materialize: mzTimes[i] ?? null,
+          time: now - (chartPoints - i - 1) * 1000, // 1 second intervals
+          postgresql: pgTimes[pgIdx] ?? null,
+          batch: batchTimes[batchIdx] ?? null,
+          materialize: mzTimes[mzIdx] ?? null,
         });
       }
 
@@ -537,7 +546,7 @@ export default function QueryStatisticsPage() {
         />
         <OrderCard
           title="Batch MATERIALIZED VIEW"
-          subtitle="Fast but STALE (refreshes every 60s)"
+          subtitle="Fast but STALE (refreshes every 20s)"
           icon={<Clock className="h-5 w-5" />}
           iconColor="text-green-500"
           bgColor="border-green-500"
@@ -662,7 +671,7 @@ export default function QueryStatisticsPage() {
                     <Clock className="h-4 w-4 text-green-500" />
                     <div>
                       <div className="font-medium text-gray-900">Batch MATERIALIZED VIEW</div>
-                      <div className="text-xs text-gray-500">Fast but STALE (refreshes every 60s)</div>
+                      <div className="text-xs text-gray-500">Fast but STALE (refreshes every 20s)</div>
                     </div>
                   </div>
                 </td>
