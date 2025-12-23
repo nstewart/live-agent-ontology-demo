@@ -1,15 +1,18 @@
 """FastAPI server for the FreshMart Operations Agent with SSE streaming."""
 
-import asyncio
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from src.graphs.ops_assistant_graph import cleanup_graph_resources, run_assistant
 
@@ -22,16 +25,24 @@ async def lifespan(app: FastAPI):
     await cleanup_graph_resources()
 
 
+# Rate limiter setup
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title="FreshMart Operations Agent",
     description="AI-powered operations assistant with SSE streaming",
     lifespan=lifespan,
 )
 
-# CORS for frontend
+# Register rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS for frontend - restrict origins based on environment
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,8 +53,8 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     """Request body for chat endpoints."""
 
-    message: str
-    thread_id: Optional[str] = None
+    message: str = Field(..., min_length=1, max_length=10000, description="User message (1-10000 characters)")
+    thread_id: Optional[str] = Field(None, max_length=100, description="Optional thread ID for conversation continuity")
 
 
 class ChatResponse(BaseModel):
@@ -79,12 +90,15 @@ async def event_generator(message: str, thread_id: str):
 
 
 @app.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+@limiter.limit("10/minute")
+async def chat_stream(request: ChatRequest, req: Request):
     """
     SSE streaming endpoint for chat.
 
     Returns a stream of Server-Sent Events with thinking states and responses.
     The thread_id is returned in the X-Thread-Id response header.
+
+    Rate limit: 10 requests per minute per IP address.
     """
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="message is required")
@@ -103,11 +117,14 @@ async def chat_stream(request: ChatRequest):
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+@limiter.limit("10/minute")
+async def chat(request: ChatRequest, req: Request):
     """
     Non-streaming chat endpoint (backwards compatible).
 
     Returns the final response after all processing is complete.
+
+    Rate limit: 10 requests per minute per IP address.
     """
     if not request.message.strip():
         raise HTTPException(status_code=400, detail="message is required")

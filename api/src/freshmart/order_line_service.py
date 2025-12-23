@@ -451,8 +451,10 @@ class OrderLineService:
                 batch_id=batch_id,
             ))
 
-        # Emit audit events
+        # Emit audit events AFTER flush (ensures they're only emitted if transaction succeeds)
+        # The actual commit happens at the route level, but flushing ensures DB operations completed
         if write_events:
+            await self.session.flush()
             write_store = get_write_store()
             write_store.add_events(write_events)
 

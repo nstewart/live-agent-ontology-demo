@@ -79,6 +79,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
+    // Timeout handler
+    const timeoutId = setTimeout(() => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    }, 120000); // 2 minute timeout
+
     try {
       const response = await fetch(`${AGENT_API_URL}/chat/stream`, {
         method: 'POST',
@@ -131,7 +138,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                       data: event.data,
                     };
                     thinkingEvents.push(toolCallEvent);
-                    setCurrentThinking([...thinkingEvents]);
+                    setCurrentThinking(prev => [...prev, toolCallEvent]);
                     break;
                   }
 
@@ -142,7 +149,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                       data: event.data,
                     };
                     thinkingEvents.push(toolResultEvent);
-                    setCurrentThinking([...thinkingEvents]);
+                    setCurrentThinking(prev => [...prev, toolResultEvent]);
                     break;
                   }
 
@@ -153,7 +160,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                       data: { content: event.data.content },
                     };
                     thinkingEvents.push(thinkingEvent);
-                    setCurrentThinking([...thinkingEvents]);
+                    setCurrentThinking(prev => [...prev, thinkingEvent]);
                     break;
                   }
 
@@ -202,6 +209,22 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         ));
       }
     } finally {
+      // Clear timeout
+      clearTimeout(timeoutId);
+
+      // Ensure message is finalized even if stream didn't complete properly
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === assistantMessageId && msg.status === 'streaming') {
+          return {
+            ...msg,
+            status: 'complete' as const,
+            content: responseContent || 'Stream ended unexpectedly',
+            thinking: thinkingEvents,
+          };
+        }
+        return msg;
+      }));
+
       setIsStreaming(false);
       setCurrentThinking([]);
       abortControllerRef.current = null;
