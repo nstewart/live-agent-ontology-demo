@@ -34,8 +34,17 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
-// Agent API URL - configurable via environment
-const AGENT_API_URL = import.meta.env.VITE_AGENT_URL || 'http://localhost:8081';
+// Agent API URL - configurable via environment with validation
+const getAgentApiUrl = (): string => {
+  const url = import.meta.env.VITE_AGENT_URL;
+  if (url && typeof url === 'string' && url.trim() !== '') {
+    return url;
+  }
+  // Fallback to localhost in development
+  return 'http://localhost:8081';
+};
+
+const AGENT_API_URL = getAgentApiUrl();
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -86,6 +95,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
     }, 120000); // 2 minute timeout
 
+    // Declare variables at function scope so they're accessible in finally block
+    let responseContent = '';
+    const thinkingEvents: ThinkingEvent[] = [];
+
     try {
       const response = await fetch(`${AGENT_API_URL}/chat/stream`, {
         method: 'POST',
@@ -113,8 +126,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let responseContent = '';
-      const thinkingEvents: ThinkingEvent[] = [];
 
       if (reader) {
         while (true) {
@@ -127,9 +138,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
+              // Parse each SSE event safely
+              let event;
               try {
-                const event = JSON.parse(line.slice(6));
+                event = JSON.parse(line.slice(6));
+              } catch (parseError) {
+                console.error('Failed to parse SSE event:', parseError, 'Raw line:', line);
+                continue; // Skip malformed events
+              }
 
+              try {
                 switch (event.type) {
                   case 'tool_call': {
                     const toolCallEvent: ThinkingEvent = {
@@ -185,8 +203,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     ));
                     break;
                 }
-              } catch (parseError) {
-                console.error('Failed to parse SSE event:', parseError);
+              } catch (eventError) {
+                console.error('Failed to process SSE event:', eventError, 'Event type:', event?.type);
               }
             }
           }

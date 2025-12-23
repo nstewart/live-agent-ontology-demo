@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from src.config import get_settings
 from src.db.client import close_connections, get_query_stats
-from src.routes import audit_router, freshmart_router, ontology_router, triples_router
+from src.routes import audit_router, freshmart_router, ontology_router, query_stats_router, triples_router
+from src.routes.query_stats import start_heartbeat_generator, stop_heartbeat_generator
 
 # Configure logging
 settings = get_settings()
@@ -36,8 +37,10 @@ logging.getLogger("uvicorn.access").addFilter(AccessLogFilter())
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting FreshMart Digital Twin API...")
+    start_heartbeat_generator()
     yield
     logger.info("Shutting down...")
+    stop_heartbeat_generator()
     await close_connections()
 
 
@@ -96,6 +99,7 @@ app.include_router(audit_router)
 app.include_router(ontology_router)
 app.include_router(triples_router)
 app.include_router(freshmart_router)
+app.include_router(query_stats_router)
 
 
 # Health endpoints
