@@ -496,7 +496,6 @@ export default function PropagationWidget() {
               {eventsByMzTs.length > 0 && (
                 <div>
                   <div className="px-3 py-2 bg-gray-800/50 flex items-center gap-2">
-                    <ChevronRight className="h-4 w-4 text-green-400" />
                     <span className="text-xs font-medium text-green-400 uppercase tracking-wide">
                       Index Propagation
                     </span>
