@@ -47,6 +47,7 @@ interface PropagationContextValue {
   clearWrites: () => void;
   isPolling: boolean;
   totalIndexUpdates: number;
+  propagationLimitHit: boolean; // True if last poll returned exactly the limit
 }
 
 const PropagationContext = createContext<PropagationContextValue | null>(null);
@@ -60,7 +61,7 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
   const [events, setEvents] = useState<PropagationEvent[]>([]);
   const [sourceWrites, setSourceWrites] = useState<SourceWriteEvent[]>([]);
   const [isPolling] = useState(true); // Always polling
-  const lastMzTs = useRef<string | null>(null);
+  const [propagationLimitHit, setPropagationLimitHit] = useState(false);
   const lastWriteTs = useRef<number | null>(null);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -103,7 +104,6 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
     setWrites([]);
     setEvents([]);
     setSourceWrites([]);
-    lastMzTs.current = null;
     lastWriteTs.current = null;
   }, []);
 
@@ -153,12 +153,11 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
   }, []);
 
   // Poll for propagation events continuously
+  // Note: We don't use since_mz_ts filtering because it can cause us to miss events
+  // when we hit the limit. Instead we fetch recent events and dedupe on frontend.
   const pollForEvents = useCallback(async () => {
     try {
       const params = new URLSearchParams();
-      if (lastMzTs.current) {
-        params.set('since_mz_ts', lastMzTs.current);
-      }
       params.set('limit', '100');
 
       const response = await fetch(`${PROPAGATION_API_URL}/propagation/events/all?${params}`);
@@ -169,15 +168,11 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
       const data = await response.json();
       const newEvents: PropagationEvent[] = data.events || [];
 
-      if (newEvents.length > 0) {
-        // Update lastMzTs to the most recent event
-        const maxMzTs = newEvents.reduce(
-          (max, e) => (e.mz_ts > max ? e.mz_ts : max),
-          lastMzTs.current || '0'
-        );
-        lastMzTs.current = maxMzTs;
+      // Track if we hit the limit (100 events means there may be more)
+      setPropagationLimitHit(newEvents.length >= 100);
 
-        // Add new events (avoid duplicates)
+      if (newEvents.length > 0) {
+        // Add new events (avoid duplicates by mz_ts + index + doc_id)
         setEvents((prev) => {
           const existingKeys = new Set(
             prev.map((e) => `${e.mz_ts}-${e.index_name}-${e.doc_id}`)
@@ -185,8 +180,11 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
           const uniqueNewEvents = newEvents.filter(
             (e) => !existingKeys.has(`${e.mz_ts}-${e.index_name}-${e.doc_id}`)
           );
-          // Keep last 200 events
-          return [...uniqueNewEvents, ...prev].slice(0, 200);
+          // Merge and sort by mz_ts descending, keep last 1000
+          // (allows up to 10 timestamps × 100 docs each for UI display)
+          const merged = [...uniqueNewEvents, ...prev];
+          merged.sort((a, b) => b.mz_ts.localeCompare(a.mz_ts));
+          return merged.slice(0, 1000);
         });
 
         // Mark any pending writes as propagated
@@ -245,6 +243,7 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
         clearWrites,
         isPolling,
         totalIndexUpdates,
+        propagationLimitHit,
       }}
     >
       {children}

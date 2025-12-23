@@ -165,6 +165,8 @@ function TimestampGroup({
   onToggle,
   expandedEntities,
   onToggleEntity,
+  totalDocs,
+  hasMoreDocs,
 }: {
   mzTs: string;
   events: PropagationEvent[];
@@ -173,6 +175,8 @@ function TimestampGroup({
   onToggle: () => void;
   expandedEntities: Set<string>;
   onToggleEntity: (key: string) => void;
+  totalDocs: number;
+  hasMoreDocs: boolean;
 }) {
   // Group events by doc_id
   const eventsByDocId = useMemo(() => {
@@ -206,7 +210,8 @@ function TimestampGroup({
           <span className="text-sm font-mono text-white">{mzTs}</span>
         </div>
         <div className="text-xs text-gray-500">
-          {docIds.length} doc{docIds.length !== 1 ? 's' : ''}
+          {totalDocs} doc{totalDocs !== 1 ? 's' : ''}
+          {hasMoreDocs && <span className="text-yellow-500"> (showing {docIds.length})</span>}
           {totalFields > 0 && `, ${totalFields} field${totalFields !== 1 ? 's' : ''}`}
         </div>
       </button>
@@ -222,6 +227,11 @@ function TimestampGroup({
               onToggle={() => onToggleEntity(`${mzTs}-${docId}`)}
             />
           ))}
+          {hasMoreDocs && (
+            <div className="ml-4 px-3 py-1 text-xs text-yellow-500">
+              ... and {totalDocs - docIds.length} more doc{totalDocs - docIds.length !== 1 ? 's' : ''} not shown
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -324,7 +334,7 @@ function SourceWriteBatch({
 }
 
 export default function PropagationWidget() {
-  const { events, sourceWrites, clearWrites, isPolling, totalIndexUpdates } = usePropagation();
+  const { events, sourceWrites, clearWrites, isPolling, totalIndexUpdates, propagationLimitHit } = usePropagation();
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedTimestamps, setExpandedTimestamps] = useState<Set<string>>(new Set());
   const [expandedEntities, setExpandedEntities] = useState<Set<string>>(new Set());
@@ -360,27 +370,45 @@ export default function PropagationWidget() {
     });
   };
 
-  // Group events by mz_ts
-  const eventsByMzTs = useMemo(() => {
-    const grouped: Record<string, { events: PropagationEvent[]; wallTime: number }> = {};
+  // Group events by mz_ts, cap at 100 docs per timestamp and 10 timestamps total
+  const { displayedTimestamps, totalTimestamps, timestampsWithMore } = useMemo(() => {
+    const grouped: Record<string, { events: PropagationEvent[]; wallTime: number; totalDocs: number }> = {};
 
     events.forEach(event => {
       if (!grouped[event.mz_ts]) {
-        grouped[event.mz_ts] = { events: [], wallTime: event.timestamp * 1000 };
+        grouped[event.mz_ts] = { events: [], wallTime: event.timestamp * 1000, totalDocs: 0 };
       }
       // Avoid duplicate events
       const exists = grouped[event.mz_ts].events.some(
         e => e.doc_id === event.doc_id && e.index_name === event.index_name && e.operation === event.operation
       );
       if (!exists) {
-        grouped[event.mz_ts].events.push(event);
+        grouped[event.mz_ts].totalDocs++;
+        // Only keep first 100 docs per timestamp for display
+        if (grouped[event.mz_ts].events.length < 100) {
+          grouped[event.mz_ts].events.push(event);
+        }
       }
     });
 
     // Sort by mz_ts descending (most recent first)
-    return Object.entries(grouped)
+    const sorted = Object.entries(grouped)
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([mzTs, data]) => ({ mzTs, ...data }));
+
+    // Track which timestamps have more docs than displayed
+    const withMore = new Set<string>();
+    sorted.forEach(({ mzTs, events, totalDocs }) => {
+      if (totalDocs > events.length) {
+        withMore.add(mzTs);
+      }
+    });
+
+    return {
+      displayedTimestamps: sorted.slice(0, 10),
+      totalTimestamps: sorted.length,
+      timestampsWithMore: withMore,
+    };
   }, [events]);
 
   const toggleTimestamp = (mzTs: string) => {
@@ -455,7 +483,7 @@ export default function PropagationWidget() {
       {/* Expanded content */}
       {isExpanded && (
         <div className="h-[calc(40vh-2.5rem)] overflow-y-auto">
-          {sourceWrites.length === 0 && eventsByMzTs.length === 0 ? (
+          {sourceWrites.length === 0 && displayedTimestamps.length === 0 ? (
             <div className="flex items-center justify-center h-full text-gray-500 text-sm">
               No propagation events yet - make a change to see updates flow through
             </div>
@@ -493,7 +521,7 @@ export default function PropagationWidget() {
               )}
 
               {/* Propagation Events Section */}
-              {eventsByMzTs.length > 0 && (
+              {displayedTimestamps.length > 0 && (
                 <div>
                   <div className="px-3 py-2 bg-gray-800/50 flex items-center gap-2">
                     <span className="text-xs font-medium text-green-400 uppercase tracking-wide">
@@ -502,8 +530,13 @@ export default function PropagationWidget() {
                     <span className="text-xs text-gray-500">
                       ({totalIndexUpdates} update{totalIndexUpdates !== 1 ? 's' : ''})
                     </span>
+                    {propagationLimitHit && (
+                      <span className="text-xs text-yellow-500" title="Showing max 100 events per poll - more events may exist">
+                        (limit reached)
+                      </span>
+                    )}
                   </div>
-                  {eventsByMzTs.map(({ mzTs, events, wallTime }) => (
+                  {displayedTimestamps.map(({ mzTs, events, wallTime, totalDocs }) => (
                     <TimestampGroup
                       key={mzTs}
                       mzTs={mzTs}
@@ -513,8 +546,15 @@ export default function PropagationWidget() {
                       onToggle={() => toggleTimestamp(mzTs)}
                       expandedEntities={expandedEntities}
                       onToggleEntity={toggleEntity}
+                      totalDocs={totalDocs}
+                      hasMoreDocs={timestampsWithMore.has(mzTs)}
                     />
                   ))}
+                  {totalTimestamps > 10 && (
+                    <div className="px-3 py-1 text-xs text-gray-500">
+                      ... and {totalTimestamps - 10} more timestamp{totalTimestamps - 10 !== 1 ? 's' : ''}
+                    </div>
+                  )}
                 </div>
               )}
             </>
