@@ -191,16 +191,30 @@ SYSTEM_PROMPT = """You are an operations assistant for FreshMart's same-day groc
 """
 
 
-def get_llm():
-    """Get the LLM based on available API keys."""
+def get_llm(enable_thinking: bool = False):
+    """Get the LLM based on available API keys.
+
+    Args:
+        enable_thinking: If True and using Anthropic, enable extended thinking.
+                        This allows the model to show its reasoning process.
+    """
     settings = get_settings()
 
     if settings.anthropic_api_key:
         from langchain_anthropic import ChatAnthropic
 
+        model_kwargs = {}
+        if enable_thinking:
+            # Enable extended thinking for Claude models that support it
+            model_kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": 5000,
+            }
+
         return ChatAnthropic(
             model=settings.llm_model,
             anthropic_api_key=settings.anthropic_api_key,
+            model_kwargs=model_kwargs if model_kwargs else None,
         )
     elif settings.openai_api_key:
         from langchain_openai import ChatOpenAI
@@ -368,6 +382,7 @@ async def run_assistant(user_message: str, thread_id: str = "default", stream_ev
         tuple[str, Any]: Status updates as (event_type, data) tuples where event_type is one of:
             - "tool_call": {"name": str, "args": dict} - Agent is calling a tool
             - "tool_result": {"content": str} - Tool execution completed
+            - "thinking": {"content": str} - Extended thinking content (if available)
             - "error": {"message": str} - An error occurred during execution
             - "response": str - Final response text (always emitted last)
     """
@@ -393,6 +408,18 @@ async def run_assistant(user_message: str, thread_id: str = "default", stream_ev
                     if "messages" in agent_data and agent_data["messages"]:
                         last_msg = agent_data["messages"][-1]
                         if isinstance(last_msg, AIMessage):
+                            # Check for extended thinking in additional_kwargs
+                            if hasattr(last_msg, "additional_kwargs"):
+                                thinking = last_msg.additional_kwargs.get("thinking")
+                                if thinking:
+                                    # Thinking can be a string or a list of blocks
+                                    if isinstance(thinking, str):
+                                        yield ("thinking", {"content": thinking})
+                                    elif isinstance(thinking, list):
+                                        for block in thinking:
+                                            if isinstance(block, dict) and block.get("type") == "thinking":
+                                                yield ("thinking", {"content": block.get("thinking", "")})
+
                             if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                                 # Agent decided to call tools
                                 for tool_call in last_msg.tool_calls:
