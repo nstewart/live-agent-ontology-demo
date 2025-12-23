@@ -276,3 +276,120 @@ export const healthApi = {
   check: () => apiClient.get('/health'),
   ready: () => apiClient.get('/ready'),
 }
+
+// Query Statistics Types
+export interface QueryStatsMetrics {
+  median: number
+  max: number
+  p99: number
+}
+
+export interface SourceStats {
+  response_time: QueryStatsMetrics
+  reaction_time: QueryStatsMetrics
+  sample_count: number
+}
+
+export interface QueryStatsResponse {
+  order_id: string | null
+  is_polling: boolean
+  postgresql_view: SourceStats
+  batch_cache: SourceStats
+  materialize: SourceStats
+  timestamp: string
+}
+
+export interface QueryStatsHistoryResponse {
+  order_id: string | null
+  postgresql_view: { reaction_times: number[] }
+  batch_cache: { reaction_times: number[] }
+  materialize: { reaction_times: number[] }
+}
+
+export interface QueryStatsOrder {
+  order_id: string
+  order_number: string | null
+  order_status: string | null
+  customer_name: string | null
+  store_name: string | null
+}
+
+export interface OrderLineItem {
+  line_id: string
+  product_id: string
+  product_name: string | null
+  category: string | null
+  quantity: number
+  unit_price: number
+  line_amount: number
+  line_sequence: number
+  perishable_flag: boolean
+}
+
+export interface OrderWithLinesData {
+  order_id: string
+  order_number: string | null
+  order_status: string | null
+  store_id: string | null
+  customer_id: string | null
+  delivery_window_start: string | null
+  delivery_window_end: string | null
+  order_total_amount: number | null
+  customer_name: string | null
+  customer_email: string | null
+  customer_address: string | null
+  store_name: string | null
+  store_zone: string | null
+  store_address: string | null
+  delivery_task_id: string | null
+  assigned_courier_id: string | null
+  delivery_task_status: string | null
+  delivery_eta: string | null
+  line_items: OrderLineItem[]
+  line_item_count: number
+  computed_total: number | null
+  has_perishable_items: boolean
+  effective_updated_at: string
+}
+
+export interface OrderDataResponse {
+  order_id: string | null
+  is_polling: boolean
+  postgresql_view: OrderWithLinesData | null
+  batch_cache: OrderWithLinesData | null
+  materialize: OrderWithLinesData | null
+}
+
+export interface OrderPredicate {
+  predicate: string
+  description: string | null
+}
+
+export interface TripleWriteRequest {
+  subject_id: string
+  predicate: string
+  object_value: string
+}
+
+export const queryStatsApi = {
+  // Get orders for dropdown selection
+  getOrders: () =>
+    apiClient.get<QueryStatsOrder[]>('/api/query-stats/orders'),
+  // Get predicates for the write triple form
+  getOrderPredicates: () =>
+    apiClient.get<OrderPredicate[]>('/api/query-stats/order-predicates'),
+  // Start polling for an order
+  startPolling: (orderId: string) =>
+    apiClient.post(`/api/query-stats/start/${encodeURIComponent(orderId)}`),
+  stopPolling: () =>
+    apiClient.post('/api/query-stats/stop'),
+  getMetrics: () =>
+    apiClient.get<QueryStatsResponse>('/api/query-stats/metrics'),
+  getMetricsHistory: () =>
+    apiClient.get<QueryStatsHistoryResponse>('/api/query-stats/metrics/history'),
+  // Get order data from all 3 sources for display cards
+  getOrderData: () =>
+    apiClient.get<OrderDataResponse>('/api/query-stats/order-data'),
+  writeTriple: (data: TripleWriteRequest) =>
+    apiClient.post('/api/query-stats/write-triple', data),
+}

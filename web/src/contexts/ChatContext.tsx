@@ -86,6 +86,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
     }, 120000); // 2 minute timeout
 
+    // Declare variables at function scope so they're accessible in finally block
+    let responseContent = '';
+    const thinkingEvents: ThinkingEvent[] = [];
+
     try {
       const response = await fetch(`${AGENT_API_URL}/chat/stream`, {
         method: 'POST',
@@ -113,8 +117,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let responseContent = '';
-      const thinkingEvents: ThinkingEvent[] = [];
 
       if (reader) {
         while (true) {
