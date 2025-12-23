@@ -519,13 +519,19 @@ async def measure_batch_query(order_id: str, store_id: Optional[str]):
             merged = merge_order_with_pricing(order_row.copy(), pricing_rows)
             latest_order_data["batch_cache"] = merged
 
-            # Reaction time = now - last_refresh (shows staleness since batch ran)
-            # This is different from PostgreSQL/Materialize which use effective_updated_at
-            # Batch staleness = time since the batch job last ran
-            if last_refresh:
-                reaction_ms = (datetime.now(timezone.utc) - last_refresh).total_seconds() * 1000
+            # Reaction time = now - effective_updated_at (same as PostgreSQL/Materialize)
+            # Use merged data's effective_updated_at which is MAX(order, pricing) timestamps
+            effective_updated = merged.get("effective_updated_at")
+            if effective_updated:
+                if isinstance(effective_updated, str):
+                    updated_at = datetime.fromisoformat(effective_updated.replace('Z', '+00:00'))
+                else:
+                    updated_at = effective_updated
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                reaction_ms = (datetime.now(timezone.utc) - updated_at).total_seconds() * 1000
             else:
-                reaction_ms = BATCH_REFRESH_INTERVAL * 1000  # Max staleness if never refreshed
+                reaction_ms = BATCH_REFRESH_INTERVAL * 1000  # Fallback if no timestamp
         else:
             reaction_ms = BATCH_REFRESH_INTERVAL * 1000  # No data yet
 
