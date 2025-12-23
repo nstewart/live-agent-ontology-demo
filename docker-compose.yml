@@ -245,6 +245,7 @@ services:
     environment:
       - VITE_API_URL=http://localhost:${API_PORT:-8080}
       - VITE_ZERO_URL=http://localhost:4848
+      - VITE_AGENT_URL=http://localhost:${AGENT_PORT:-8081}
     ports:
       - "${WEB_PORT:-5173}:5173"
     depends_on:

@@ -74,11 +74,12 @@ The system automatically seeds demo data: 5 stores, 15 products, 15 customers, 2
 - **Zone-based adjustments**: Manhattan (+15%), Brooklyn (+5%), baseline Queens
 - **Perishability discounts**: 5% off to move inventory faster
 - **Local scarcity premiums**: +10% for items with low store stock
-- **Demand multipliers**: Real-time pricing based on sales velocity
+- **Demand multipliers**: Real-time pricing based on sales velocity (recent 7-day vs prior 7-day unit sales)
 - **Live price display** in UI shopping cart and order creation
 
 ### AI-Powered Operations
 - **Agent control loop**: Observe (pre-assembled context in milliseconds) → Think (LLM reasoning) → Act (writes visible within seconds)
+- **Embedded Chat Widget**: Floating Operations Assistant accessible from any page with SSE streaming
 - **Natural language search** over orders and inventory via OpenSearch
 - **LangGraph agents** with tools for semantic reasoning over the knowledge graph
 - **Conversational memory** with PostgreSQL-backed checkpointing
@@ -162,7 +163,27 @@ docker-compose --profile agent up -d
 docker-compose exec agents python -m src.init_checkpointer
 ```
 
-### Interactive Chat
+### Chat Widget (Recommended)
+
+The easiest way to interact with the Operations Assistant is through the embedded chat widget in the Admin UI:
+
+1. Open the Admin UI at http://localhost:5173
+2. Click the green chat bubble in the bottom-right corner
+3. Ask questions or give commands in natural language
+
+**Features:**
+- **SSE Streaming**: See tool calls and results in real-time as the agent works
+- **Markdown Rendering**: Formatted responses with tables, lists, and code
+- **Session Persistence**: Conversation memory maintained across page navigation
+- **Thinking Display**: Expandable view of agent reasoning steps
+
+**Example queries:**
+- "List all stores in Queens"
+- "What couriers are available at store:MAN-01?"
+- "Find orders for Lisa that are out for delivery"
+- "Add 2 gallons of milk to order FM-000001"
+
+### Terminal Chat
 
 ```bash
 # Start interactive session with conversation memory
@@ -194,12 +215,12 @@ See [AGENTS.md](docs/AGENTS.md) for complete agent capabilities, tool descriptio
 | **db** | 5432 | PostgreSQL - primary triple store |
 | **mz** | 6874 | Materialize Admin Console |
 | **mz** | 6875 | Materialize SQL interface |
-| **zero-server** | 8090 | WebSocket server for real-time UI updates |
+| **zero-cache** | 4848 | Zero cache for real-time UI updates |
 | **opensearch** | 9200 | Search engine for orders and inventory |
 | **api** | 8080 | FastAPI backend |
-| **search-sync** | - | Dual SUBSCRIBE workers for OpenSearch sync |
-| **web** | 5173 | React admin UI with real-time updates |
-| **agents** | 8081 | LangGraph agent runner (optional) |
+| **search-sync** | 8083 | SUBSCRIBE workers for OpenSearch sync + propagation API |
+| **web** | 5173 | React admin UI with real-time updates and chat widget |
+| **agents** | 8081 | LangGraph agent with SSE streaming API (optional) |
 
 ## Development
 
@@ -296,12 +317,15 @@ freshmart-digital-twin-agent-starter/
 ├── web/                       # React admin UI
 │   └── src/
 │       ├── api/               # API client
+│       ├── components/        # ChatWidget and other shared components
+│       ├── contexts/          # ChatContext for agent communication
 │       ├── hooks/             # useZeroQuery for real-time data
 │       └── pages/             # Orders, Couriers, Stores dashboards
 │
 ├── agents/                    # LangGraph agents
 │   └── src/
-│       ├── tools/             # Agent tools
+│       ├── server.py          # FastAPI server with SSE streaming
+│       ├── tools/             # Agent tools (list_stores, list_couriers, etc.)
 │       └── graphs/            # LangGraph definitions
 │
 └── docs/                      # Documentation
