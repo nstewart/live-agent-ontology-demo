@@ -278,41 +278,49 @@ export default function QueryStatisticsPage() {
       setOrderData(orderDataRes.data);
       setLastUpdateTime(Date.now());
 
-      // Update chart data with the latest reaction times
+      // Update chart data with the latest reaction times using actual timestamps
       const history = historyRes.data as QueryStatsHistoryResponse;
       const now = Date.now();
-      const maxSamples = 1800; // 3 minutes worth of chart points
+      const threeMinutesAgo = now - 180000; // 3 minutes in ms
 
-      // Build chart data from history
-      // Each source has different sample counts due to different QPS rates
-      const pgTimes = history.postgresql_view?.reaction_times || [];
-      const batchTimes = history.batch_cache?.reaction_times || [];
-      const mzTimes = history.materialize?.reaction_times || [];
+      // Build chart data from history using actual timestamps
+      // Each source may have different sample rates, so we combine them all
+      const pgData = history.postgresql_view || { reaction_times: [], timestamps: [] };
+      const batchData = history.batch_cache || { reaction_times: [], timestamps: [] };
+      const mzData = history.materialize || { reaction_times: [], timestamps: [] };
 
-      // Use a fixed number of chart points and sample from each array
-      // This normalizes the different sample rates to a common time axis
-      const chartPoints = Math.min(maxSamples, 180); // 180 points = 1 per second for 3 minutes
-      const newChartData: ChartDataPoint[] = [];
+      // Create a map of time -> data point, using 1-second buckets for smoothing
+      const dataBySecond = new Map<number, ChartDataPoint>();
 
-      for (let i = 0; i < chartPoints; i++) {
-        // Calculate the proportional index for each source array
-        // This aligns all sources to the same time axis (most recent on the right)
-        const pgIdx = Math.floor((i / chartPoints) * pgTimes.length);
-        const batchIdx = Math.floor((i / chartPoints) * batchTimes.length);
-        const mzIdx = Math.floor((i / chartPoints) * mzTimes.length);
+      // Helper to add data point to the appropriate second bucket
+      const addToChart = (timestamp: number, value: number, source: 'postgresql' | 'batch' | 'materialize') => {
+        if (timestamp < threeMinutesAgo) return; // Skip old data
+        const bucket = Math.floor(timestamp / 1000) * 1000; // Round to nearest second
+        if (!dataBySecond.has(bucket)) {
+          dataBySecond.set(bucket, { time: bucket, postgresql: null, batch: null, materialize: null });
+        }
+        const point = dataBySecond.get(bucket)!;
+        // Use latest value for this second (or average if preferred)
+        point[source] = value;
+      };
 
-        newChartData.push({
-          time: now - (chartPoints - i - 1) * 1000, // 1 second intervals
-          postgresql: pgTimes[pgIdx] ?? null,
-          batch: batchTimes[batchIdx] ?? null,
-          materialize: mzTimes[mzIdx] ?? null,
-        });
+      // Add all data points from each source
+      for (let i = 0; i < pgData.reaction_times.length; i++) {
+        const ts = pgData.timestamps[i];
+        if (ts) addToChart(ts, pgData.reaction_times[i], 'postgresql');
+      }
+      for (let i = 0; i < batchData.reaction_times.length; i++) {
+        const ts = batchData.timestamps[i];
+        if (ts) addToChart(ts, batchData.reaction_times[i], 'batch');
+      }
+      for (let i = 0; i < mzData.reaction_times.length; i++) {
+        const ts = mzData.timestamps[i];
+        if (ts) addToChart(ts, mzData.reaction_times[i], 'materialize');
       }
 
-      // Filter to only show last 3 minutes (180 seconds)
-      const threeMinutesAgo = now - 180000;
-      const filteredData = newChartData.filter((d) => d.time >= threeMinutesAgo);
-      chartDataRef.current = filteredData.slice(-maxSamples);
+      // Convert map to sorted array
+      const newChartData = Array.from(dataBySecond.values()).sort((a, b) => a.time - b.time);
+      chartDataRef.current = newChartData;
       setChartData(chartDataRef.current);
       setError(null);
     } catch (err) {

@@ -54,8 +54,8 @@ for seed in "$SCRIPT_DIR/../seed"/*.sql; do
     fi
 done
 
-# Generate representative operational data with scale factor 0.01
-echo "Generating demo operational data (scale=0.01)..."
-python3 "$SCRIPT_DIR/generate_load_test_data.py" --scale 0.01
+# Generate representative operational data with scale factor 1.0
+echo "Generating demo operational data (scale=1.0)..."
+python3 "$SCRIPT_DIR/generate_load_test_data.py" --scale 1.0
 
 echo "Seed complete!"

@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/query-stats", tags=["Query Statistics"])
 
 # Configuration
-MAX_SAMPLES = 3000  # Keep enough samples for 3 minutes of high-throughput data
+MAX_SAMPLES = 25000  # Keep enough samples for 3 minutes of high-throughput data (~120 QPS * 180s = 21,600)
 BATCH_REFRESH_INTERVAL = 20  # seconds
 HEARTBEAT_INTERVAL = 1.0  # 1 second
 QPS_WINDOW_SIZE = 1.0  # 1 second rolling window for QPS calculation
@@ -46,8 +46,16 @@ QPS_WINDOW_SIZE = 1.0  # 1 second rolling window for QPS calculation
 # Batch cache and Materialize are fast, allow more concurrency
 CONCURRENCY_LIMITS = {
     "postgresql_view": 1,   # Slow query - 1 at a time
-    "batch_cache": 5,       # Fast query - up to 5 concurrent
+    "batch_cache": 1,       # Memory read - 1 at a time (throttled for chart readability)
     "materialize": 5,       # Fast query - up to 5 concurrent
+}
+
+# Throttle rates per source (seconds between query batches)
+# This controls how often we record metrics, not actual query capability
+THROTTLE_RATES = {
+    "postgresql_view": 0.0,  # No throttle - already slow
+    "batch_cache": 0.1,      # 10 QPS - enough to show it's fast, but not overwhelm chart
+    "materialize": 0.0,      # No throttle - want to show actual throughput
 }
 
 
@@ -73,6 +81,8 @@ class SourceMetrics:
 
     response_times: deque = field(default_factory=lambda: deque(maxlen=MAX_SAMPLES))
     reaction_times: deque = field(default_factory=lambda: deque(maxlen=MAX_SAMPLES))
+    # Timestamps for each sample (for time-based chart display)
+    sample_timestamps: deque = field(default_factory=lambda: deque(maxlen=MAX_SAMPLES))
     # Timestamps for QPS calculation (rolling window)
     query_timestamps: list = field(default_factory=list)
     query_count: int = 0
@@ -80,12 +90,14 @@ class SourceMetrics:
 
     def record(self, response_ms: float, reaction_ms: float):
         """Record a query measurement."""
+        now = time.time()
         self.response_times.append(response_ms)
         self.reaction_times.append(reaction_ms)
+        self.sample_timestamps.append(now * 1000)  # Store as milliseconds for JS
         self.query_count += 1
-        self.last_query_time = time.time()
+        self.last_query_time = now
         # Record timestamp for QPS calculation
-        self.query_timestamps.append(time.time())
+        self.query_timestamps.append(now)
 
     def calculate_qps(self) -> float:
         """Calculate queries per second using a rolling window (Freshmart approach).
@@ -136,6 +148,7 @@ class SourceMetrics:
         """Clear all recorded samples."""
         self.response_times.clear()
         self.reaction_times.clear()
+        self.sample_timestamps.clear()
         self.query_timestamps.clear()
         self.query_count = 0
 
@@ -279,31 +292,70 @@ async def heartbeat_loop():
         raise
 
 
+# In-memory batch cache for the selected order (refreshed every 20 seconds)
+batch_cache_data: dict[str, Any] = {
+    "order": None,
+    "pricing": [],
+    "last_refresh": None,
+}
+
+
 async def batch_refresh_loop():
-    """Refresh the inventory_items_with_dynamic_pricing_batch MATERIALIZED VIEW every 60 seconds."""
+    """Refresh the batch cache for the selected order every 20 seconds.
+
+    Instead of refreshing entire MATERIALIZED VIEWs (which is very slow with large data),
+    this simulates a batch ETL process that periodically caches specific data.
+    The batch cache stores a snapshot of the selected order's data, demonstrating
+    how batch processes have stale data between refresh cycles.
+    """
+    global current_order_id, current_store_id, batch_cache_data
     logger.info("Starting batch refresh loop")
+    first_run = True
     try:
         while True:
-            await asyncio.sleep(BATCH_REFRESH_INTERVAL)
-            try:
-                start = time.perf_counter()
-                async with get_pg_session() as session:
-                    await session.execute(
-                        text("REFRESH MATERIALIZED VIEW inventory_items_with_dynamic_pricing_batch")
-                    )
-                    # Update the refresh log
+            # Wait for interval (skip on first run to get immediate data)
+            if not first_run:
+                await asyncio.sleep(BATCH_REFRESH_INTERVAL)
+            first_run = False
+
+            if current_order_id:
+                try:
+                    start = time.perf_counter()
+                    async with get_pg_session() as session:
+                        # Query the PostgreSQL VIEW for just this order (same as live query)
+                        order_result = await session.execute(
+                            text("""
+                                SELECT *
+                                FROM orders_with_lines_full
+                                WHERE order_id = :order_id
+                            """),
+                            {"order_id": current_order_id},
+                        )
+                        order_row = order_result.mappings().fetchone()
+
+                        # Query dynamic pricing for the store
+                        pricing_rows = []
+                        if current_store_id:
+                            pricing_result = await session.execute(
+                                text("""
+                                    SELECT product_id, live_price, base_price, price_change,
+                                           stock_level, effective_updated_at
+                                    FROM inventory_items_with_dynamic_pricing
+                                    WHERE store_id = :store_id
+                                """),
+                                {"store_id": current_store_id},
+                            )
+                            pricing_rows = [dict(row) for row in pricing_result.mappings().fetchall()]
+
+                    # Store in batch cache
+                    batch_cache_data["order"] = dict(order_row) if order_row else None
+                    batch_cache_data["pricing"] = pricing_rows
+                    batch_cache_data["last_refresh"] = datetime.now(timezone.utc)
+
                     duration_ms = (time.perf_counter() - start) * 1000
-                    await session.execute(
-                        text("""
-                            UPDATE materialized_view_refresh_log
-                            SET last_refresh = NOW(), refresh_duration_ms = :duration
-                            WHERE view_name = 'inventory_items_with_dynamic_pricing_batch'
-                        """),
-                        {"duration": duration_ms},
-                    )
-                logger.info(f"Batch MATERIALIZED VIEW refreshed in {duration_ms:.1f}ms")
-            except Exception as e:
-                logger.warning(f"Batch refresh failed: {e}")
+                    logger.info(f"Batch cache refreshed for {current_order_id} in {duration_ms:.1f}ms")
+                except Exception as e:
+                    logger.warning(f"Batch refresh failed: {e}")
     except asyncio.CancelledError:
         logger.info("Batch refresh loop stopped")
         raise
@@ -316,17 +368,18 @@ source_semaphores: dict[str, asyncio.Semaphore] = {}
 async def continuous_load_generator(source: str, query_func):
     """Generate continuous query load for a single source (Freshmart approach).
 
-    This fires queries as fast as possible up to the concurrency limit.
-    Unlike fixed polling, this measures actual throughput capacity.
+    This fires queries up to the concurrency limit with optional throttling.
+    Throttle rates control how often metrics are recorded for chart readability.
     """
     global current_order_id, current_store_id, source_semaphores
 
     # Create semaphore for this source's concurrency limit
     concurrency_limit = CONCURRENCY_LIMITS.get(source, 1)
+    throttle_rate = THROTTLE_RATES.get(source, 0.0)
     semaphore = asyncio.Semaphore(concurrency_limit)
     source_semaphores[source] = semaphore
 
-    logger.info(f"Starting load generator for {source} (concurrency: {concurrency_limit})")
+    logger.info(f"Starting load generator for {source} (concurrency: {concurrency_limit}, throttle: {throttle_rate}s)")
 
     async def run_query():
         """Execute a single query with semaphore control."""
@@ -336,11 +389,11 @@ async def continuous_load_generator(source: str, query_func):
 
     try:
         while current_order_id:
-            # Fire queries up to concurrency limit without waiting
+            # Fire queries up to concurrency limit
             tasks = [asyncio.create_task(run_query()) for _ in range(concurrency_limit)]
             await asyncio.gather(*tasks, return_exceptions=True)
-            # Small yield to allow other tasks to run
-            await asyncio.sleep(0.001)
+            # Apply throttle rate (or minimal yield if no throttle)
+            await asyncio.sleep(max(throttle_rate, 0.001))
     except asyncio.CancelledError:
         logger.info(f"Load generator stopped for {source}")
         raise
@@ -442,66 +495,39 @@ async def measure_pg_view_query(order_id: str, store_id: Optional[str]):
 
 
 async def measure_batch_query(order_id: str, store_id: Optional[str]):
-    """Query batch MATERIALIZED VIEWs and record metrics.
+    """Read from in-memory batch cache and record metrics.
 
-    This queries:
-    1. orders_with_lines_batch MATERIALIZED VIEW (order + line items)
-    2. inventory_items_with_dynamic_pricing_batch MATERIALIZED VIEW (pre-computed pricing)
+    The batch cache is refreshed every 20 seconds by batch_refresh_loop().
+    This simulates a batch/ETL process where data is periodically cached.
 
-    Both MATERIALIZED VIEWs are pre-computed and refreshed every 60 seconds.
-    The query is FAST because it reads pre-computed results.
-    But the data is STALE (up to 60 seconds old).
+    The query is INSTANT (just reading from memory).
+    But the data is STALE (up to 20 seconds old between refreshes).
     """
+    global batch_cache_data
     start = time.perf_counter()
 
     try:
-        async with get_pg_session() as session:
-            # Query order with line items from batch cache
-            order_result = await session.execute(
-                text("""
-                    SELECT *
-                    FROM orders_with_lines_batch
-                    WHERE order_id = :order_id
-                """),
-                {"order_id": order_id},
-            )
-            order_row = order_result.mappings().fetchone()
-
-            # Query pre-computed pricing from batch cache
-            pricing_rows = []
-            if store_id:
-                pricing_result = await session.execute(
-                    text("""
-                        SELECT product_id, live_price, base_price, price_change,
-                               stock_level, effective_updated_at
-                        FROM inventory_items_with_dynamic_pricing_batch
-                        WHERE store_id = :store_id
-                    """),
-                    {"store_id": store_id},
-                )
-                pricing_rows = [dict(row) for row in pricing_result.mappings().fetchall()]
+        # Read from in-memory batch cache (instant)
+        order_row = batch_cache_data.get("order")
+        pricing_rows = batch_cache_data.get("pricing", [])
+        last_refresh = batch_cache_data.get("last_refresh")
 
         response_ms = (time.perf_counter() - start) * 1000
 
         # Merge order with pricing
         if order_row:
-            merged = merge_order_with_pricing(dict(order_row), pricing_rows)
+            merged = merge_order_with_pricing(order_row.copy(), pricing_rows)
             latest_order_data["batch_cache"] = merged
 
-            # Reaction time = now - effective_updated_at (shows staleness)
-            effective_updated = merged.get("effective_updated_at")
-            if effective_updated:
-                if isinstance(effective_updated, str):
-                    updated_at = datetime.fromisoformat(effective_updated.replace('Z', '+00:00'))
-                else:
-                    updated_at = effective_updated
-                if updated_at.tzinfo is None:
-                    updated_at = updated_at.replace(tzinfo=timezone.utc)
-                reaction_ms = (datetime.now(timezone.utc) - updated_at).total_seconds() * 1000
+            # Reaction time = now - last_refresh (shows staleness since batch ran)
+            # This is different from PostgreSQL/Materialize which use effective_updated_at
+            # Batch staleness = time since the batch job last ran
+            if last_refresh:
+                reaction_ms = (datetime.now(timezone.utc) - last_refresh).total_seconds() * 1000
             else:
-                reaction_ms = 60000  # Assume max staleness if no data
+                reaction_ms = BATCH_REFRESH_INTERVAL * 1000  # Max staleness if never refreshed
         else:
-            reaction_ms = 60000
+            reaction_ms = BATCH_REFRESH_INTERVAL * 1000  # No data yet
 
         metrics_store["batch_cache"].record(response_ms, reaction_ms)
     except Exception as e:
@@ -714,6 +740,11 @@ async def start_polling(order_id: str):
     for key in latest_order_data:
         latest_order_data[key] = None
 
+    # Reset batch cache
+    batch_cache_data["order"] = None
+    batch_cache_data["pricing"] = []
+    batch_cache_data["last_refresh"] = None
+
     # Start background tasks
     heartbeat_task = asyncio.create_task(heartbeat_loop())
     polling_task = asyncio.create_task(continuous_query_loop())
@@ -768,14 +799,21 @@ async def get_metrics():
 
 @router.get("/metrics/history")
 async def get_metrics_history():
-    """Get raw metrics history for charting."""
+    """Get raw metrics history for charting with timestamps."""
     return {
         "order_id": current_order_id,
         "postgresql_view": {
-            "reaction_times": list(metrics_store["postgresql_view"].reaction_times)
+            "reaction_times": list(metrics_store["postgresql_view"].reaction_times),
+            "timestamps": list(metrics_store["postgresql_view"].sample_timestamps),
         },
-        "batch_cache": {"reaction_times": list(metrics_store["batch_cache"].reaction_times)},
-        "materialize": {"reaction_times": list(metrics_store["materialize"].reaction_times)},
+        "batch_cache": {
+            "reaction_times": list(metrics_store["batch_cache"].reaction_times),
+            "timestamps": list(metrics_store["batch_cache"].sample_timestamps),
+        },
+        "materialize": {
+            "reaction_times": list(metrics_store["materialize"].reaction_times),
+            "timestamps": list(metrics_store["materialize"].sample_timestamps),
+        },
     }
 
 
