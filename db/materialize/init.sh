@@ -397,9 +397,10 @@ FROM triples
 WHERE subject_id LIKE 'product:%'
 GROUP BY subject_id;"
 
-echo "Creating dynamic pricing view..."
+echo "Creating dynamic pricing view with market basket and time-of-day analysis..."
 
-# Dynamic pricing view - regular view with pricing logic
+# Dynamic pricing view - regular view with 9 pricing factors including
+# market basket analysis (O(n²) self-join) and time-of-day demand patterns
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE VIEW IF NOT EXISTS inventory_items_with_dynamic_pricing AS
 WITH
@@ -421,16 +422,69 @@ WITH
     WHERE o.order_status = 'DELIVERED'
   ),
 
-  -- Sales velocity: Compare recent sales (last 5 orders) to prior sales (orders 6-15)
-  -- This measures whether demand is accelerating or decelerating (by units sold)
+  -- ==========================================================================
+  -- MARKET BASKET ANALYSIS (Expensive O(n²) self-join)
+  -- Find products frequently bought together to enable anchor pricing strategy
+  -- ==========================================================================
+  product_pairs AS (
+    -- Self-join order lines to find co-purchased products (expensive!)
+    SELECT
+      ol1.product_id AS product_a,
+      ol2.product_id AS product_b,
+      ol1.order_id
+    FROM order_lines_flat_mv ol1
+    JOIN order_lines_flat_mv ol2
+      ON ol1.order_id = ol2.order_id
+      AND ol1.product_id < ol2.product_id
+  ),
+
+  cross_sell_affinity AS (
+    -- Calculate affinity scores for each product pair
+    SELECT
+      product_a,
+      product_b,
+      COUNT(*) AS co_purchase_count,
+      COUNT(*)::numeric / NULLIF(
+        (SELECT COUNT(DISTINCT order_id) FROM order_lines_flat_mv WHERE product_id = product_a), 0
+      ) AS affinity_score_a,
+      COUNT(*)::numeric / NULLIF(
+        (SELECT COUNT(DISTINCT order_id) FROM order_lines_flat_mv WHERE product_id = product_b), 0
+      ) AS affinity_score_b
+    FROM product_pairs
+    GROUP BY product_a, product_b
+    HAVING COUNT(*) >= 2
+  ),
+
+  basket_metrics AS (
+    SELECT
+      product_id,
+      COUNT(*) AS num_affinity_products,
+      AVG(affinity_score) AS avg_affinity_score,
+      MAX(co_purchase_count) AS max_copurchase_count,
+      CASE
+        WHEN COUNT(*) >= 5 AND AVG(affinity_score) > 0.3 THEN TRUE
+        ELSE FALSE
+      END AS is_basket_driver
+    FROM (
+      SELECT product_a AS product_id, affinity_score_a AS affinity_score, co_purchase_count
+      FROM cross_sell_affinity
+      UNION ALL
+      SELECT product_b AS product_id, affinity_score_b AS affinity_score, co_purchase_count
+      FROM cross_sell_affinity
+    ) all_affinities
+    GROUP BY product_id
+  ),
+
+  -- Note: TIME-OF-DAY DEMAND PATTERNS are NOT included in Materialize
+  -- because NOW() cannot be used in materialized views (mz_now() only works in WHERE/HAVING)
+  -- PostgreSQL views include time-of-day pricing; Materialize uses 8 factors instead of 9
+
+  -- Sales velocity
   sales_velocity AS (
     SELECT
       product_id,
-      -- Units sold in the most recent 5 orders per product
       SUM(quantity) FILTER (WHERE rn <= 5) AS recent_sales,
-      -- Units sold in orders 6-15 per product (prior period)
       SUM(quantity) FILTER (WHERE rn > 5 AND rn <= 15) AS prior_sales,
-      -- Total units sold for reference
       SUM(quantity) AS total_sales
     FROM (
       SELECT
@@ -443,7 +497,6 @@ WITH
     GROUP BY product_id
   ),
 
-  -- Rank products by popularity (units sold) within category
   popularity_score AS (
     SELECT
       product_id,
@@ -454,7 +507,6 @@ WITH
     GROUP BY product_id, category
   ),
 
-  -- Calculate total stock across all stores per product and rank by scarcity
   inventory_status AS (
     SELECT
       product_id,
@@ -464,7 +516,6 @@ WITH
     GROUP BY product_id
   ),
 
-  -- Identify high demand products (above average sales)
   high_demand_products AS (
     SELECT
       product_id,
@@ -476,58 +527,52 @@ WITH
     FROM popularity_score
   ),
 
-  -- Combine all product-level pricing factors
   pricing_factors AS (
     SELECT
       ps.product_id,
       ps.category,
       ps.sale_count,
       ps.popularity_rank,
-
-      -- Popularity adjustment: Top 3 get 20% premium, 4-10 get 10%, rest get 10% discount
       CASE
         WHEN ps.popularity_rank <= 3 THEN 1.20
         WHEN ps.popularity_rank BETWEEN 4 AND 10 THEN 1.10
         ELSE 0.90
       END AS popularity_adjustment,
-
-      -- Stock scarcity adjustment: Low stock (high scarcity rank) gets premium
       CASE
         WHEN inv.scarcity_rank <= 3 THEN 1.15
         WHEN inv.scarcity_rank BETWEEN 4 AND 10 THEN 1.08
         WHEN inv.scarcity_rank BETWEEN 11 AND 20 THEN 1.00
         ELSE 0.95
       END AS scarcity_adjustment,
-
-      -- Demand multiplier: Based on sales velocity (recent vs prior sales)
-      -- If recent_sales > prior_sales, demand is accelerating -> higher multiplier
-      -- If recent_sales < prior_sales, demand is decelerating -> lower multiplier
-      -- Capped between 0.85 and 1.25 to prevent extreme swings
       CASE
         WHEN sv.prior_sales > 0 THEN
           LEAST(GREATEST(
             1.0 + ((sv.recent_sales::numeric / sv.prior_sales) - 1.0) * 0.25,
             0.85
           ), 1.25)
-        WHEN sv.recent_sales > 0 THEN 1.10  -- New demand with no prior history
+        WHEN sv.recent_sales > 0 THEN 1.10
         ELSE 1.0
       END AS demand_multiplier,
-
-      -- High demand flag for additional premium
       CASE WHEN hd.is_high_demand THEN 1.05 ELSE 1.0 END AS demand_premium,
-
+      -- MARKET BASKET ADJUSTMENT
+      CASE
+        WHEN bm.is_basket_driver THEN 0.95
+        WHEN bm.num_affinity_products >= 3 THEN 0.98
+        ELSE 1.0
+      END AS basket_adjustment,
       inv.total_stock,
       sv.recent_sales,
       sv.prior_sales,
-      sv.total_sales
-
+      sv.total_sales,
+      bm.num_affinity_products,
+      bm.is_basket_driver
     FROM popularity_score ps
     LEFT JOIN inventory_status inv ON inv.product_id = ps.product_id
     LEFT JOIN sales_velocity sv ON sv.product_id = ps.product_id
     LEFT JOIN high_demand_products hd ON hd.product_id = ps.product_id
+    LEFT JOIN basket_metrics bm ON bm.product_id = ps.product_id
   )
 
--- Final SELECT: Apply all adjustments to each inventory item
 SELECT
   inv.inventory_id,
   inv.store_id,
@@ -541,8 +586,6 @@ SELECT
   inv.available_quantity,
   inv.perishable,
   inv.unit_price AS base_price,
-
-  -- Store-specific adjustments
   CASE
     WHEN inv.store_zone = 'MAN' THEN 1.15
     WHEN inv.store_zone = 'BK' THEN 1.05
@@ -551,29 +594,23 @@ SELECT
     WHEN inv.store_zone = 'SI' THEN 0.95
     ELSE 1.00
   END AS zone_adjustment,
-
-  -- Perishable discount to move inventory faster
   CASE
     WHEN inv.perishable = TRUE THEN 0.95
     ELSE 1.0
   END AS perishable_adjustment,
-
-  -- Low available stock at this specific store gets additional premium
   CASE
     WHEN inv.available_quantity <= 5 THEN 1.10
     WHEN inv.available_quantity <= 15 THEN 1.03
     ELSE 1.0
   END AS local_stock_adjustment,
-
-  -- Product-level factors from CTEs
   pf.popularity_adjustment,
   pf.scarcity_adjustment,
   pf.demand_multiplier,
   pf.demand_premium,
+  pf.basket_adjustment,
   pf.sale_count AS product_sale_count,
   pf.total_stock AS product_total_stock,
-
-  -- Computed dynamic price with all factors (using available quantity, not total stock)
+  -- Computed dynamic price with 8 factors (time-of-day excluded for Materialize)
   ROUND(
     (COALESCE(inv.unit_price, 0) *
     CASE WHEN inv.store_zone = 'MAN' THEN 1.15
@@ -589,11 +626,10 @@ SELECT
     COALESCE(pf.popularity_adjustment, 1.0) *
     COALESCE(pf.scarcity_adjustment, 1.0) *
     COALESCE(pf.demand_multiplier, 1.0) *
-    COALESCE(pf.demand_premium, 1.0))::numeric,
+    COALESCE(pf.demand_premium, 1.0) *
+    COALESCE(pf.basket_adjustment, 1.0))::numeric,
     2
   ) AS live_price,
-
-  -- Price difference for easy comparison
   ROUND(
     ((COALESCE(inv.unit_price, 0) *
       CASE WHEN inv.store_zone = 'MAN' THEN 1.15
@@ -609,17 +645,14 @@ SELECT
       COALESCE(pf.popularity_adjustment, 1.0) *
       COALESCE(pf.scarcity_adjustment, 1.0) *
       COALESCE(pf.demand_multiplier, 1.0) *
-      COALESCE(pf.demand_premium, 1.0)
+      COALESCE(pf.demand_premium, 1.0) *
+      COALESCE(pf.basket_adjustment, 1.0)
     ) - COALESCE(inv.unit_price, 0))::numeric,
     2
   ) AS price_change,
-
   inv.effective_updated_at
-
 FROM store_inventory_mv inv
 LEFT JOIN pricing_factors pf ON pf.product_id = inv.product_id
--- Note: Previously filtered out OUT_OF_STOCK items, but now includes all items with unit_price
--- to allow agents and search to see complete inventory state including out-of-stock items
 WHERE inv.unit_price IS NOT NULL;"
 
 # Orders with aggregated line items and search fields (customer, store, delivery info)
