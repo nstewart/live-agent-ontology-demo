@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/query-stats", tags=["Query Statistics"])
 
 # Configuration
-MAX_SAMPLES = 25000  # Keep enough samples for 3 minutes of high-throughput data (~120 QPS * 180s = 21,600)
+MAX_SAMPLES = 500000  # Keep 3 min of history even at high QPS (~2700 QPS * 180s). Memory: ~12MB per source.
 BATCH_REFRESH_INTERVAL = 20  # seconds
 HEARTBEAT_INTERVAL = 1.0  # 1 second
 QPS_WINDOW_SIZE = 1.0  # 1 second rolling window for QPS calculation
