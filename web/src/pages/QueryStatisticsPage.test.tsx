@@ -321,5 +321,165 @@ describe('QueryStatisticsPage ViewMode', () => {
         })
       })
     })
+
+    it('validates subject length and shows error message', async () => {
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1001')).toBeInTheDocument()
+      })
+
+      const subjectInput = screen.getByPlaceholderText('order:FM-1001')
+      const valueInput = screen.getByPlaceholderText('DELIVERED')
+
+      // Create a subject that's too long (> 255 chars)
+      const longSubject = 'order:' + 'a'.repeat(260)
+      fireEvent.change(subjectInput, { target: { value: longSubject } })
+      fireEvent.change(valueInput, { target: { value: 'DELIVERED' } })
+
+      const writeButton = screen.getByRole('button', { name: /write/i })
+      fireEvent.click(writeButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Subject too long/i)).toBeInTheDocument()
+      })
+
+      // Should not call API
+      expect(queryStatsApi.writeTriple).not.toHaveBeenCalled()
+    })
+
+    it('validates subject format and shows error message', async () => {
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1001')).toBeInTheDocument()
+      })
+
+      const subjectInput = screen.getByPlaceholderText('order:FM-1001')
+      const valueInput = screen.getByPlaceholderText('DELIVERED')
+
+      // Invalid subject format (no colon or underscore)
+      fireEvent.change(subjectInput, { target: { value: 'invalidsubject' } })
+      fireEvent.change(valueInput, { target: { value: 'DELIVERED' } })
+
+      const writeButton = screen.getByRole('button', { name: /write/i })
+      fireEvent.click(writeButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/Subject should be in format/i)).toBeInTheDocument()
+      })
+
+      // Should not call API
+      expect(queryStatsApi.writeTriple).not.toHaveBeenCalled()
+    })
+
+    it('handles API errors gracefully', async () => {
+      vi.mocked(queryStatsApi.writeTriple).mockRejectedValue(new Error('Network error'))
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1001')).toBeInTheDocument()
+      })
+
+      const subjectInput = screen.getByPlaceholderText('order:FM-1001')
+      const valueInput = screen.getByPlaceholderText('DELIVERED')
+
+      fireEvent.change(subjectInput, { target: { value: 'order:FM-1001' } })
+      fireEvent.change(valueInput, { target: { value: 'DELIVERED' } })
+
+      const writeButton = screen.getByRole('button', { name: /write/i })
+      fireEvent.click(writeButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Write failed')).toBeInTheDocument()
+      })
+    })
+  })
+
+  describe('Edge Cases', () => {
+    it('handles empty orders list', async () => {
+      vi.mocked(queryStatsApi.getOrders).mockResolvedValue({ data: [] } as never)
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        // Should render without crashing
+        expect(screen.getByText('IVM Demo')).toBeInTheDocument()
+      })
+
+      // Start polling button should be disabled with no orders
+      const startButton = screen.getByRole('button', { name: /start polling/i })
+      expect(startButton).toBeDisabled()
+    })
+
+    it('handles orders with no line items', async () => {
+      const orderWithNoLines = {
+        order_id: 'order:FM-1003',
+        order_number: 'FM-1003',
+        order_status: 'PLACED',
+        customer_name: 'Test User',
+        store_name: 'Test Store',
+      }
+
+      vi.mocked(queryStatsApi.getOrders).mockResolvedValue({
+        data: [orderWithNoLines]
+      } as never)
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1003')).toBeInTheDocument()
+      })
+
+      // Should render without crashing
+      expect(screen.getByText('PostgreSQL VIEW')).toBeInTheDocument()
+    })
+
+    it('handles network errors during data loading', async () => {
+      vi.mocked(queryStatsApi.getOrders).mockRejectedValue(new Error('Network error'))
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load orders')).toBeInTheDocument()
+      })
+    })
+
+    it('handles network errors during polling', async () => {
+      vi.mocked(queryStatsApi.startPolling).mockRejectedValue(new Error('Network error'))
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1001')).toBeInTheDocument()
+      })
+
+      const startButton = screen.getByRole('button', { name: /start polling/i })
+      fireEvent.click(startButton)
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to start polling')).toBeInTheDocument()
+      })
+    })
+
+    it('handles metrics fetch errors during polling', async () => {
+      vi.mocked(queryStatsApi.startPolling).mockResolvedValue({ data: {} } as never)
+      vi.mocked(queryStatsApi.getMetrics).mockRejectedValue(new Error('Metrics error'))
+
+      render(<QueryStatisticsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('FM-1001')).toBeInTheDocument()
+      })
+
+      const startButton = screen.getByRole('button', { name: /start polling/i })
+      fireEvent.click(startButton)
+
+      // Should handle gracefully without crashing
+      await waitFor(() => {
+        expect(screen.getByText(/polling/i)).toBeInTheDocument()
+      })
+    })
   })
 })

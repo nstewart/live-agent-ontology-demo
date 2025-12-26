@@ -395,7 +395,7 @@ export default function QueryStatisticsPage() {
         setTripleSubject(zeroOrder.line_items[0].line_id);
       }
     }
-  }, [zeroOrder, selectedOrderId]);
+  }, [zeroOrder, selectedOrderId, tripleSubject]);
 
   const metricsIntervalRef = useRef<number | null>(null);
   const chartDataRef = useRef<ChartDataPoint[]>([]);
@@ -558,6 +558,32 @@ export default function QueryStatisticsPage() {
   // Handle triple write
   const handleWriteTriple = async () => {
     if (!tripleSubject || !triplePredicate || !tripleValue) return;
+
+    // Validate input lengths
+    if (tripleSubject.length > 255) {
+      setWriteStatus("Error: Subject too long (max 255 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    if (triplePredicate.length > 255) {
+      setWriteStatus("Error: Predicate too long (max 255 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    if (tripleValue.length > 1000) {
+      setWriteStatus("Error: Value too long (max 1000 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    // Validate subject format (should contain a colon or underscore)
+    if (!tripleSubject.includes(':') && !tripleSubject.includes('_')) {
+      setWriteStatus("Error: Subject should be in format 'type:id' or 'type_id'");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
 
     try {
       await queryStatsApi.writeTriple({
