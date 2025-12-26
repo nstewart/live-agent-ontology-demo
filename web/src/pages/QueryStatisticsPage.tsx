@@ -36,7 +36,6 @@ import {
   QueryStatsOrder,
   OrderDataResponse,
   OrderWithLinesData,
-  OrderPredicate,
   OrderLineItem,
 } from "../api/client";
 import { LineageGraph } from "../components/LineageGraph";
@@ -47,6 +46,20 @@ interface ChartDataPoint {
   batch: number | null;
   materialize: number | null;
 }
+
+type ViewMode = 'query-offload' | 'batch' | 'materialize';
+
+// Predicates available for each subject type
+const predicatesBySubjectType: Record<string, string[]> = {
+  order: ['order_status', 'order_number', 'delivery_window_start', 'delivery_window_end'],
+  orderline: ['quantity', 'order_line_unit_price', 'line_sequence', 'perishable_flag'],
+  customer: ['customer_name', 'customer_email', 'customer_address'],
+  store: ['store_name', 'store_zone', 'store_address'],
+  product: ['product_name', 'category', 'unit_price', 'perishable', 'unit_weight_grams'],
+  inventory: ['stock_level', 'replenishment_eta'],
+  courier: ['courier_name', 'courier_phone', 'courier_status'],
+  task: ['task_status', 'assigned_to', 'eta'],
+};
 
 // Status badge component
 const StatusBadge = ({ status }: { status: string | null }) => {
@@ -183,29 +196,34 @@ const OrderCard = ({ title, subtitle, icon, iconColor, bgColor, order, isLoading
                     {order.line_items.map((item: OrderLineItem) => (
                       <div
                         key={item.line_id}
-                        className="flex justify-between text-xs py-1 px-2 bg-gray-50 rounded"
+                        className="text-xs py-1 px-2 bg-gray-50 rounded"
                       >
-                        <span className="truncate max-w-[100px]">
-                          {item.product_name || item.product_id}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-600">
-                            {item.quantity} x
+                        <div className="flex justify-between">
+                          <span className="truncate max-w-[100px]">
+                            {item.product_name || item.product_id}
                           </span>
-                          {item.live_price != null ? (
-                            <div className="flex flex-col items-end">
-                              <span className="font-medium text-blue-600">
-                                ${item.live_price.toFixed(2)}
-                              </span>
-                              {item.price_change != null && item.price_change !== 0 && (
-                                <span className={`text-[10px] ${item.price_change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {item.price_change > 0 ? '+' : ''}${item.price_change.toFixed(2)}
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-600">
+                              {item.quantity} x
+                            </span>
+                            {item.live_price != null ? (
+                              <div className="flex flex-col items-end">
+                                <span className="font-medium text-blue-600">
+                                  ${item.live_price.toFixed(2)}
                                 </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-500">${item.unit_price?.toFixed(2)}</span>
-                          )}
+                                {item.price_change != null && item.price_change !== 0 && (
+                                  <span className={`text-[10px] ${item.price_change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {item.price_change > 0 ? '+' : ''}${item.price_change.toFixed(2)}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-gray-500">${item.unit_price?.toFixed(2)}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                          {item.line_id}
                         </div>
                       </div>
                     ))}
@@ -227,7 +245,6 @@ const OrderCard = ({ title, subtitle, icon, iconColor, bgColor, order, isLoading
 
 export default function QueryStatisticsPage() {
   const [orders, setOrders] = useState<QueryStatsOrder[]>([]);
-  const [predicates, setPredicates] = useState<OrderPredicate[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string>("");
   const [isPolling, setIsPolling] = useState(false);
   const [metrics, setMetrics] = useState<QueryStatsResponse | null>(null);
@@ -327,24 +344,69 @@ export default function QueryStatisticsPage() {
 
   // Triple writer state
   const [tripleSubject, setTripleSubject] = useState("");
-  const [triplePredicate, setTriplePredicate] = useState("order_status");
+  const [triplePredicate, setTriplePredicate] = useState("quantity");
   const [tripleValue, setTripleValue] = useState("");
   const [writeStatus, setWriteStatus] = useState<string | null>(null);
+  const userSetSubjectRef = useRef(false);
+
+  // View mode state
+  const [viewMode, setViewMode] = useState<ViewMode>('query-offload');
+
+  // Derive subject type from tripleSubject prefix and get available predicates
+  const availablePredicates = useMemo(() => {
+    if (!tripleSubject) return predicatesBySubjectType.orderline;
+
+    // Extract prefix before the colon (e.g., "orderline:123" -> "orderline")
+    const colonIndex = tripleSubject.indexOf(':');
+    if (colonIndex === -1) {
+      // No colon found, try to detect type from ID format
+      if (tripleSubject.startsWith('order_')) return predicatesBySubjectType.order;
+      if (tripleSubject.startsWith('orderline_')) return predicatesBySubjectType.orderline;
+      if (tripleSubject.startsWith('customer_')) return predicatesBySubjectType.customer;
+      if (tripleSubject.startsWith('store_')) return predicatesBySubjectType.store;
+      if (tripleSubject.startsWith('product_')) return predicatesBySubjectType.product;
+      if (tripleSubject.startsWith('inventory_')) return predicatesBySubjectType.inventory;
+      if (tripleSubject.startsWith('courier_')) return predicatesBySubjectType.courier;
+      if (tripleSubject.startsWith('task_')) return predicatesBySubjectType.task;
+      // Unknown subject type - warn and default to orderline
+      console.warn(`Unknown subject type for ID: "${tripleSubject}", defaulting to orderline predicates`);
+      return predicatesBySubjectType.orderline;
+    }
+
+    const prefix = tripleSubject.slice(0, colonIndex).toLowerCase();
+    if (!predicatesBySubjectType[prefix]) {
+      console.warn(`Unknown subject type prefix: "${prefix}", defaulting to orderline predicates`);
+    }
+    return predicatesBySubjectType[prefix] || predicatesBySubjectType.orderline;
+  }, [tripleSubject]);
+
+  // Update predicate when available predicates change (if current predicate is not in new list)
+  useEffect(() => {
+    if (availablePredicates.length > 0 && !availablePredicates.includes(triplePredicate)) {
+      setTriplePredicate(availablePredicates[0]);
+    }
+  }, [availablePredicates, triplePredicate]);
+
+  // Default tripleSubject to first orderline when Zero data becomes available
+  useEffect(() => {
+    if (zeroOrder?.line_items && zeroOrder.line_items.length > 0 && selectedOrderId && !userSetSubjectRef.current) {
+      // Only update if tripleSubject is still set to the order ID (not already an orderline)
+      if (tripleSubject === selectedOrderId || !tripleSubject.startsWith('orderline_')) {
+        setTripleSubject(zeroOrder.line_items[0].line_id);
+      }
+    }
+  }, [zeroOrder, selectedOrderId, tripleSubject]);
 
   const metricsIntervalRef = useRef<number | null>(null);
   const chartDataRef = useRef<ChartDataPoint[]>([]);
   const responseTimeChartDataRef = useRef<ChartDataPoint[]>([]);
 
-  // Load orders and predicates on mount
+  // Load orders on mount
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [ordersRes, predicatesRes] = await Promise.all([
-          queryStatsApi.getOrders(),
-          queryStatsApi.getOrderPredicates(),
-        ]);
+        const ordersRes = await queryStatsApi.getOrders();
         setOrders(ordersRes.data);
-        setPredicates(predicatesRes.data);
         if (ordersRes.data.length > 0) {
           setSelectedOrderId(ordersRes.data[0].order_id);
           setTripleSubject(ordersRes.data[0].order_id);
@@ -497,6 +559,32 @@ export default function QueryStatisticsPage() {
   const handleWriteTriple = async () => {
     if (!tripleSubject || !triplePredicate || !tripleValue) return;
 
+    // Validate input lengths
+    if (tripleSubject.length > 255) {
+      setWriteStatus("Error: Subject too long (max 255 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    if (triplePredicate.length > 255) {
+      setWriteStatus("Error: Predicate too long (max 255 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    if (tripleValue.length > 1000) {
+      setWriteStatus("Error: Value too long (max 1000 chars)");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
+    // Validate subject format (should contain a colon or underscore)
+    if (!tripleSubject.includes(':') && !tripleSubject.includes('_')) {
+      setWriteStatus("Error: Subject should be in format 'type:id' or 'type_id'");
+      setTimeout(() => setWriteStatus(null), 3000);
+      return;
+    }
+
     try {
       await queryStatsApi.writeTriple({
         subject_id: tripleSubject,
@@ -546,6 +634,18 @@ export default function QueryStatisticsPage() {
             Incremental View Maintenance: PostgreSQL VIEW vs Batch Refresh vs Materialize IVM
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-600">View Mode:</label>
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as ViewMode)}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white"
+          >
+            <option value="query-offload">Query Offload</option>
+            <option value="batch">Batch Computation</option>
+            <option value="materialize">Materialize</option>
+          </select>
+        </div>
       </div>
 
       {error && (
@@ -565,6 +665,7 @@ export default function QueryStatisticsPage() {
               onChange={(e) => {
                 setSelectedOrderId(e.target.value);
                 setTripleSubject(e.target.value);
+                userSetSubjectRef.current = false; // Reset flag when changing orders
               }}
               disabled={isPolling}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
@@ -615,7 +716,10 @@ export default function QueryStatisticsPage() {
             <input
               type="text"
               value={tripleSubject}
-              onChange={(e) => setTripleSubject(e.target.value)}
+              onChange={(e) => {
+                userSetSubjectRef.current = true;
+                setTripleSubject(e.target.value);
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
               placeholder="order:FM-1001"
             />
@@ -627,9 +731,9 @@ export default function QueryStatisticsPage() {
               onChange={(e) => setTriplePredicate(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
             >
-              {predicates.map((p) => (
-                <option key={p.predicate} value={p.predicate}>
-                  {p.predicate}
+              {availablePredicates.map((p) => (
+                <option key={p} value={p}>
+                  {p}
                 </option>
               ))}
             </select>
@@ -687,8 +791,12 @@ export default function QueryStatisticsPage() {
         )}
       </div>
 
-      {/* Three Order Cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      {/* Order Cards - conditional rendering based on view mode */}
+      <div className={`grid gap-4 mb-6 ${
+        viewMode === 'query-offload' ? 'grid-cols-1' :
+        viewMode === 'batch' ? 'grid-cols-2' : 'grid-cols-3'
+      }`}>
+        {/* PostgreSQL VIEW - shown in all modes */}
         <OrderCard
           title="PostgreSQL VIEW"
           subtitle="Fresh but SLOW (computes every query)"
@@ -698,24 +806,30 @@ export default function QueryStatisticsPage() {
           order={orderData?.postgresql_view || null}
           isLoading={isPolling}
         />
-        <OrderCard
-          title="Batch MATERIALIZED VIEW"
-          subtitle="Fast but STALE (refreshes every 20s)"
-          icon={<Clock className="h-5 w-5" />}
-          iconColor="text-green-500"
-          bgColor="border-green-500"
-          order={orderData?.batch_cache || null}
-          isLoading={isPolling}
-        />
-        <OrderCard
-          title="Materialize (via Zero)"
-          subtitle="Real-time sync - updates instantly"
-          icon={<Zap className="h-5 w-5" />}
-          iconColor="text-blue-500"
-          bgColor="border-blue-500"
-          order={zeroMaterializeOrder}
-          isLoading={false}
-        />
+        {/* Batch MATERIALIZED VIEW - shown in batch and materialize modes */}
+        {(viewMode === 'batch' || viewMode === 'materialize') && (
+          <OrderCard
+            title="Batch MATERIALIZED VIEW"
+            subtitle="Fast but STALE (refreshes every 20s)"
+            icon={<Clock className="h-5 w-5" />}
+            iconColor="text-green-500"
+            bgColor="border-green-500"
+            order={orderData?.batch_cache || null}
+            isLoading={isPolling}
+          />
+        )}
+        {/* Materialize - shown only in materialize mode */}
+        {viewMode === 'materialize' && (
+          <OrderCard
+            title="Materialize (via Zero)"
+            subtitle="Real-time sync - updates instantly"
+            icon={<Zap className="h-5 w-5" />}
+            iconColor="text-blue-500"
+            bgColor="border-blue-500"
+            order={zeroMaterializeOrder}
+            isLoading={false}
+          />
+        )}
       </div>
 
       {/* Statistics Table */}
@@ -818,82 +932,86 @@ export default function QueryStatisticsPage() {
                 </td>
               </tr>
 
-              {/* Batch Cache Row */}
-              <tr className="hover:bg-gray-50">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-green-500" />
-                    <div>
-                      <div className="font-medium text-gray-900">Batch MATERIALIZED VIEW</div>
-                      <div className="text-xs text-gray-500">Fast but STALE (refreshes every 20s)</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono">
-                  {formatMs(metrics?.batch_cache?.response_time?.median)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono">
-                  {formatMs(metrics?.batch_cache?.response_time?.p99)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono">
-                  {formatMs(metrics?.batch_cache?.response_time?.max)}
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
-                  {formatMs(metrics?.batch_cache?.reaction_time?.median)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono text-green-600">
-                  {formatMs(metrics?.batch_cache?.reaction_time?.p99)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono text-green-600">
-                  {formatMs(metrics?.batch_cache?.reaction_time?.max)}
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
-                  {metrics?.batch_cache?.qps?.toFixed(1) || 0}
-                </td>
-                <td className="px-2 py-3 text-center border-l text-gray-500">
-                  {metrics?.batch_cache?.sample_count || 0}
-                </td>
-              </tr>
-
-              {/* Materialize Row */}
-              <tr className="hover:bg-gray-50 bg-blue-50">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Zap className="h-4 w-4 text-blue-500" />
-                    <div>
-                      <div className="font-medium text-gray-900 flex items-center gap-1">
-                        Materialize
-                        <span className="text-xs text-blue-600 font-normal bg-blue-100 px-1 rounded">Best</span>
+              {/* Batch Cache Row - shown in batch and materialize modes */}
+              {(viewMode === 'batch' || viewMode === 'materialize') && (
+                <tr className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-green-500" />
+                      <div>
+                        <div className="font-medium text-gray-900">Batch MATERIALIZED VIEW</div>
+                        <div className="text-xs text-gray-500">Fast but STALE (refreshes every 20s)</div>
                       </div>
-                      <div className="text-xs text-gray-500">Fast AND Fresh (incremental via CDC)</div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono">
-                  {formatMs(metrics?.materialize?.response_time?.median)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono">
-                  {formatMs(metrics?.materialize?.response_time?.p99)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono">
-                  {formatMs(metrics?.materialize?.response_time?.max)}
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
-                  {formatMs(metrics?.materialize?.reaction_time?.median)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
-                  {formatMs(metrics?.materialize?.reaction_time?.p99)}
-                </td>
-                <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
-                  {formatMs(metrics?.materialize?.reaction_time?.max)}
-                </td>
-                <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
-                  {metrics?.materialize?.qps?.toFixed(1) || 0}
-                </td>
-                <td className="px-2 py-3 text-center border-l text-gray-500">
-                  {metrics?.materialize?.sample_count || 0}
-                </td>
-              </tr>
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono">
+                    {formatMs(metrics?.batch_cache?.response_time?.median)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono">
+                    {formatMs(metrics?.batch_cache?.response_time?.p99)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono">
+                    {formatMs(metrics?.batch_cache?.response_time?.max)}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
+                    {formatMs(metrics?.batch_cache?.reaction_time?.median)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono text-green-600">
+                    {formatMs(metrics?.batch_cache?.reaction_time?.p99)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono text-green-600">
+                    {formatMs(metrics?.batch_cache?.reaction_time?.max)}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
+                    {metrics?.batch_cache?.qps?.toFixed(1) || 0}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l text-gray-500">
+                    {metrics?.batch_cache?.sample_count || 0}
+                  </td>
+                </tr>
+              )}
+
+              {/* Materialize Row - shown only in materialize mode */}
+              {viewMode === 'materialize' && (
+                <tr className="hover:bg-gray-50 bg-blue-50">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-blue-500" />
+                      <div>
+                        <div className="font-medium text-gray-900 flex items-center gap-1">
+                          Materialize
+                          <span className="text-xs text-blue-600 font-normal bg-blue-100 px-1 rounded">Best</span>
+                        </div>
+                        <div className="text-xs text-gray-500">Fast AND Fresh (incremental via CDC)</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono">
+                    {formatMs(metrics?.materialize?.response_time?.median)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono">
+                    {formatMs(metrics?.materialize?.response_time?.p99)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono">
+                    {formatMs(metrics?.materialize?.response_time?.max)}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
+                    {formatMs(metrics?.materialize?.reaction_time?.median)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
+                    {formatMs(metrics?.materialize?.reaction_time?.p99)}
+                  </td>
+                  <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
+                    {formatMs(metrics?.materialize?.reaction_time?.max)}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
+                    {metrics?.materialize?.qps?.toFixed(1) || 0}
+                  </td>
+                  <td className="px-2 py-3 text-center border-l text-gray-500">
+                    {metrics?.materialize?.sample_count || 0}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -975,6 +1093,7 @@ export default function QueryStatisticsPage() {
                   contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
                 />
                 <Legend />
+                {/* PostgreSQL line - always shown */}
                 <Line
                   type="monotone"
                   dataKey="postgresql"
@@ -985,26 +1104,32 @@ export default function QueryStatisticsPage() {
                   connectNulls
                   isAnimationActive={false}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="batch"
-                  name="Batch Cache"
-                  stroke="#22c55e"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="materialize"
-                  name="Materialize"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
+                {/* Batch line - shown in batch and materialize modes */}
+                {(viewMode === 'batch' || viewMode === 'materialize') && (
+                  <Line
+                    type="monotone"
+                    dataKey="batch"
+                    name="Batch Cache"
+                    stroke="#22c55e"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {/* Materialize line - shown only in materialize mode */}
+                {viewMode === 'materialize' && (
+                  <Line
+                    type="monotone"
+                    dataKey="materialize"
+                    name="Materialize"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1087,6 +1212,7 @@ export default function QueryStatisticsPage() {
                   contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
                 />
                 <Legend />
+                {/* PostgreSQL line - always shown */}
                 <Line
                   type="monotone"
                   dataKey="postgresql"
@@ -1097,26 +1223,32 @@ export default function QueryStatisticsPage() {
                   connectNulls
                   isAnimationActive={false}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="batch"
-                  name="Batch Cache"
-                  stroke="#22c55e"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="materialize"
-                  name="Materialize"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                  isAnimationActive={false}
-                />
+                {/* Batch line - shown in batch and materialize modes */}
+                {(viewMode === 'batch' || viewMode === 'materialize') && (
+                  <Line
+                    type="monotone"
+                    dataKey="batch"
+                    name="Batch Cache"
+                    stroke="#22c55e"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
+                {/* Materialize line - shown only in materialize mode */}
+                {viewMode === 'materialize' && (
+                  <Line
+                    type="monotone"
+                    dataKey="materialize"
+                    name="Materialize"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                    isAnimationActive={false}
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>
