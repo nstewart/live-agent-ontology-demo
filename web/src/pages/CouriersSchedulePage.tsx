@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { triplesApi, CourierSchedule, TripleCreate } from '../api/client'
 import { useZero, useQuery } from '@rocicorp/zero/react'
 import { Schema } from '../schema'
-import { Truck, Bike, Car, Coffee, Plus, Edit2, Trash2, X, Search, ExternalLink, Wifi, WifiOff, Users, Clock, Package, AlertTriangle } from 'lucide-react'
+import { Truck, Bike, Car, Coffee, Plus, Edit2, Trash2, X, Search, ExternalLink, Wifi, WifiOff, Users, Clock, Package } from 'lucide-react'
 import { CourierFormModal, CourierFormData } from '../components/CourierFormModal'
 
 type StoreMetrics = {
@@ -21,77 +21,10 @@ type StoreMetrics = {
   health_status: 'HEALTHY' | 'WARNING' | 'CRITICAL'
 }
 
-function StoreCapacityCard({ metrics, onClick, isSelected }: { metrics: StoreMetrics; onClick?: () => void; isSelected?: boolean }) {
-  const statusColors = {
-    HEALTHY: { bg: 'bg-green-50 border-green-200', indicator: 'bg-green-500', text: 'text-green-700' },
-    WARNING: { bg: 'bg-yellow-50 border-yellow-200', indicator: 'bg-yellow-500', text: 'text-yellow-700' },
-    CRITICAL: { bg: 'bg-red-50 border-red-200', indicator: 'bg-red-500', text: 'text-red-700' },
-  }
-
-  const colors = statusColors[metrics.health_status]
-  const availabilityPct = metrics.total_couriers > 0
-    ? (metrics.available_couriers / metrics.total_couriers) * 100
-    : 0
-
-  return (
-    <div
-      className={`rounded-lg border-2 p-4 ${colors.bg} ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''} ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
-      onClick={onClick}
-    >
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h3 className="font-semibold text-gray-900">{metrics.store_name}</h3>
-          <span className="text-xs text-gray-500">{metrics.store_zone}</span>
-        </div>
-        <div className={`w-3 h-3 rounded-full ${colors.indicator}`} title={metrics.health_status} />
-      </div>
-
-      {/* Courier Availability Bar */}
-      <div className="mb-3">
-        <div className="flex items-center justify-between text-sm mb-1">
-          <span className="text-gray-600 flex items-center gap-1">
-            <Users className="h-3.5 w-3.5" />
-            Couriers
-          </span>
-          <span className="font-medium">
-            {metrics.available_couriers}/{metrics.total_couriers} available
-          </span>
-        </div>
-        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-green-500 transition-all duration-300"
-            style={{ width: `${availabilityPct}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-2 text-sm">
-        <div className="flex items-center gap-1.5">
-          <Package className="h-3.5 w-3.5 text-gray-400" />
-          <span className="text-gray-600">Queue:</span>
-          <span className="font-medium">{metrics.orders_in_queue}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Clock className="h-3.5 w-3.5 text-gray-400" />
-          <span className="text-gray-600">Picking:</span>
-          <span className="font-medium">{metrics.orders_picking}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Truck className="h-3.5 w-3.5 text-gray-400" />
-          <span className="text-gray-600">Delivering:</span>
-          <span className="font-medium">{metrics.orders_delivering}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-gray-400" />
-          <span className="text-gray-600">Util:</span>
-          <span className={`font-medium ${metrics.utilization_pct >= 80 ? 'text-red-600' : metrics.utilization_pct >= 50 ? 'text-yellow-600' : 'text-green-600'}`}>
-            {metrics.utilization_pct.toFixed(0)}%
-          </span>
-        </div>
-      </div>
-    </div>
-  )
+const healthStatusColors = {
+  HEALTHY: 'bg-green-500',
+  WARNING: 'bg-yellow-500',
+  CRITICAL: 'bg-red-500',
 }
 
 const vehicleIcons: Record<string, typeof Truck> = {
@@ -333,22 +266,117 @@ export default function CouriersSchedulePage() {
         <div className="text-center py-8 text-gray-500">Loading couriers...</div>
       )}
 
-      {/* Store Capacity Cards */}
+      {/* Store Capacity Table */}
       {storeMetrics.length > 0 && (
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Store Demand vs Capacity</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {storeMetrics.map((metrics) => (
-              <StoreCapacityCard
-                key={metrics.store_id}
-                metrics={metrics}
-                isSelected={selectedStoreId === metrics.store_id}
-                onClick={() => {
-                  setSelectedStoreId(selectedStoreId === metrics.store_id ? null : metrics.store_id)
-                  setCourierIdSearch('')
-                }}
-              />
-            ))}
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Store
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Zone
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Health
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" />
+                        Couriers
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Util
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Package className="h-3.5 w-3.5" />
+                        Queue
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        Picking
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Truck className="h-3.5 w-3.5" />
+                        Delivering
+                      </span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {storeMetrics.map((metrics) => {
+                    const isSelected = selectedStoreId === metrics.store_id
+                    return (
+                      <tr
+                        key={metrics.store_id}
+                        onClick={() => {
+                          setSelectedStoreId(isSelected ? null : metrics.store_id)
+                          setCourierIdSearch('')
+                        }}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-blue-50 hover:bg-blue-100'
+                            : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-sm font-medium text-gray-900">{metrics.store_name}</span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-sm text-gray-500">{metrics.store_zone}</span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-center">
+                          <span
+                            className={`inline-block w-3 h-3 rounded-full ${healthStatusColors[metrics.health_status]}`}
+                            title={metrics.health_status}
+                          />
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-sm text-gray-900">
+                            {metrics.available_couriers}/{metrics.total_couriers}
+                          </span>
+                          <span className="text-xs text-gray-500 ml-1">avail</span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right">
+                          <span className={`text-sm font-medium ${
+                            metrics.utilization_pct >= 80 ? 'text-red-600' :
+                            metrics.utilization_pct >= 50 ? 'text-yellow-600' :
+                            'text-green-600'
+                          }`}>
+                            {metrics.utilization_pct.toFixed(0)}%
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right">
+                          <span className={`text-sm font-medium ${metrics.orders_in_queue > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                            {metrics.orders_in_queue}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right">
+                          <span className={`text-sm font-medium ${metrics.orders_picking > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                            {metrics.orders_picking}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-right">
+                          <span className={`text-sm font-medium ${metrics.orders_delivering > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                            {metrics.orders_delivering}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
