@@ -45,18 +45,17 @@ class TestCreateLineItemTriples:
     """Tests for _create_line_item_triples helper method."""
 
     def test_creates_all_required_triples(self, service):
-        """Creates all 7 required triples for a line item."""
+        """Creates all 6 required triples for a line item (perishable_flag is derived from product)."""
         line_item = OrderLineCreate(
             product_id="product:PROD-001",
             quantity=2,
             unit_price=Decimal("12.50"),
             line_sequence=1,
-            perishable_flag=True,
         )
 
         triples = service._create_line_item_triples("order:FM-1001", 1, line_item)
 
-        assert len(triples) == 7
+        assert len(triples) == 6
         predicates = {t.predicate for t in triples}
         assert predicates == {
             "line_of_order",
@@ -65,7 +64,6 @@ class TestCreateLineItemTriples:
             "order_line_unit_price",
             "line_amount",
             "line_sequence",
-            "perishable_flag",
         }
 
     def test_calculates_line_amount_correctly(self, service):
@@ -75,7 +73,6 @@ class TestCreateLineItemTriples:
             quantity=3,
             unit_price=Decimal("10.00"),
             line_sequence=1,
-            perishable_flag=False,
         )
 
         triples = service._create_line_item_triples("order:FM-1001", 1, line_item)
@@ -90,7 +87,6 @@ class TestCreateLineItemTriples:
             quantity=1,
             unit_price=Decimal("5.00"),
             line_sequence=2,
-            perishable_flag=True,
         )
 
         triples = service._create_line_item_triples("order:FM-1001", 2, line_item)
@@ -117,7 +113,6 @@ class TestCreateLineItemsBatch:
                 quantity=2,
                 unit_price=Decimal("20.00"),
                 line_sequence=1,  # Duplicate sequence
-                perishable_flag=True,
             ),
         ]
 
@@ -133,7 +128,6 @@ class TestCreateLineItemsBatch:
                 quantity=2,
                 unit_price=Decimal("20.00"),
                 line_sequence=2,
-                perishable_flag=True,
             ),
             OrderLineCreate(
                 product_id="product:PROD-001",
@@ -185,7 +179,6 @@ class TestListOrderLines:
                 unit_price=Decimal("10.00"),
                 line_amount=Decimal("20.00"),
                 line_sequence=1,
-                perishable_flag=True,
                 effective_updated_at=now,
             ),
             MagicMock(
@@ -254,8 +247,7 @@ class TestUpdateLineItem:
                     unit_price=Decimal("10.00"),
                     line_amount=Decimal("50.00"),  # Updated
                     line_sequence=1,
-                    perishable_flag=True,
-                    effective_updated_at=now,
+                        effective_updated_at=now,
                 ),
             ]
 
@@ -273,7 +265,7 @@ class TestDeleteLineItem:
     async def test_returns_true_when_deleted(self, service, mock_session):
         """Returns True when line item is successfully deleted."""
         mock_result = MagicMock()
-        mock_result.rowcount = 7  # 7 triples deleted
+        mock_result.rowcount = 6  # 6 triples deleted (perishable_flag is derived)
         mock_session.execute.return_value = mock_result
 
         result = await service.delete_line_item("orderline:FM-1001-001")
@@ -299,7 +291,7 @@ class TestDeleteOrderLines:
     async def test_returns_count_of_deleted_lines(self, service, mock_session):
         """Returns count of deleted line items."""
         mock_result = MagicMock()
-        mock_result.rowcount = 21  # 3 line items * 7 triples each
+        mock_result.rowcount = 18  # 3 line items * 6 triples each (perishable_flag is derived)
         mock_session.execute.return_value = mock_result
 
         count = await service.delete_order_lines("order:FM-1001")
@@ -353,7 +345,6 @@ class TestUpdateOrderFields:
                 quantity=2,
                 unit_price=Decimal("20.00"),
                 line_sequence=1,  # Duplicate!
-                perishable_flag=True,
             ),
         ]
 
@@ -461,7 +452,6 @@ class TestUpdateOrderFields:
             MagicMock(subject_id=existing_line_id, predicate="quantity", object_value="2"),
             MagicMock(subject_id=existing_line_id, predicate="order_line_unit_price", object_value="10.00"),
             MagicMock(subject_id=existing_line_id, predicate="line_amount", object_value="20.00"),
-            MagicMock(subject_id=existing_line_id, predicate="perishable_flag", object_value="false"),
         ]
 
         mock_session.execute.side_effect = [
@@ -527,11 +517,10 @@ class TestUpdateOrderFields:
             MagicMock(subject_id=existing_line_id_1, predicate="quantity", object_value="2"),
             MagicMock(subject_id=existing_line_id_1, predicate="order_line_unit_price", object_value="10.00"),
             MagicMock(subject_id=existing_line_id_1, predicate="line_amount", object_value="20.00"),
-            MagicMock(subject_id=existing_line_id_1, predicate="perishable_flag", object_value="false"),
         ]
 
         mock_delete_result = MagicMock()
-        mock_delete_result.rowcount = 7
+        mock_delete_result.rowcount = 6
 
         mock_session.execute.side_effect = [
             mock_order_check,
@@ -584,7 +573,7 @@ class TestUpdateOrderFields:
         mock_existing_vals.fetchall.return_value = []
 
         mock_delete_result = MagicMock()
-        mock_delete_result.rowcount = 7
+        mock_delete_result.rowcount = 6
 
         mock_session.execute.side_effect = [
             mock_order_check,
@@ -629,7 +618,6 @@ class TestUpdateOrderFields:
             MagicMock(subject_id=existing_line_id, predicate="quantity", object_value="2"),
             MagicMock(subject_id=existing_line_id, predicate="order_line_unit_price", object_value="10.0"),  # Different format
             MagicMock(subject_id=existing_line_id, predicate="line_amount", object_value="20"),  # Different format
-            MagicMock(subject_id=existing_line_id, predicate="perishable_flag", object_value="false"),
         ]
 
         mock_session.execute.side_effect = [

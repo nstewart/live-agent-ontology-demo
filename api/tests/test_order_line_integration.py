@@ -196,12 +196,7 @@ async def test_order_line_crud_workflow(async_client: AsyncClient):
             "object_value": "1",
             "object_type": "int",
         },
-        {
-            "subject_id": line_id_1,
-            "predicate": "perishable_flag",
-            "object_value": "false",
-            "object_type": "bool",
-        },
+        # Note: perishable_flag is NOT stored - it is derived from the product's perishable attribute
     ]
 
     create_order_response = await async_client.post(
@@ -241,7 +236,6 @@ async def test_order_line_crud_workflow(async_client: AsyncClient):
                     "quantity": 3,
                     "unit_price": 5.00,
                     "line_sequence": 2,
-                    "perishable_flag": True,
                 }
             ]
         },
@@ -338,7 +332,6 @@ async def test_add_line_with_invalid_product(async_client: AsyncClient):
                     "product_id": "product:DOES-NOT-EXIST",
                     "quantity": 1,
                     "unit_price": 10.00,
-                    "perishable_flag": False,
                 }
             ]
         },

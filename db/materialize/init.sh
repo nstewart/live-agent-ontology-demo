@@ -159,6 +159,7 @@ GROUP BY o.subject_id, ot.computed_total;"
 echo "Creating order line views..."
 
 # Order lines base view
+# Note: perishable_flag is NOT stored here - it is derived from products in order_lines_flat_mv
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE VIEW IF NOT EXISTS order_lines_base AS
 SELECT
@@ -171,13 +172,13 @@ SELECT
     (MAX(CASE WHEN predicate = 'quantity' THEN object_value END)::INT
      * MAX(CASE WHEN predicate = 'order_line_unit_price' THEN object_value END)::DECIMAL(10,2))::DECIMAL(10,2) AS line_amount,
     MAX(CASE WHEN predicate = 'line_sequence' THEN object_value END)::INT AS line_sequence,
-    MAX(CASE WHEN predicate = 'perishable_flag' THEN object_value END)::BOOLEAN AS perishable_flag,
     MAX(updated_at) AS effective_updated_at
 FROM triples
 WHERE subject_id LIKE 'orderline:%'
 GROUP BY subject_id;"
 
 # Order lines flat materialized view with product enrichment
+# perishable_flag is DERIVED from products_flat.perishable (not stored on order line)
 psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
 CREATE MATERIALIZED VIEW IF NOT EXISTS order_lines_flat_mv IN CLUSTER compute AS
 SELECT
@@ -188,12 +189,12 @@ SELECT
     ol.unit_price,
     ol.line_amount,
     ol.line_sequence,
-    ol.perishable_flag,
+    p.perishable AS perishable_flag,  -- Derived from product
     p.product_name,
     p.category,
     p.unit_price AS current_product_price,
     p.unit_weight_grams,
-    ol.effective_updated_at
+    GREATEST(ol.effective_updated_at, p.effective_updated_at) AS effective_updated_at
 FROM order_lines_base ol
 LEFT JOIN products_flat p ON p.product_id = ol.product_id;"
 

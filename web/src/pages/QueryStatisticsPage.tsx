@@ -52,13 +52,51 @@ type ViewMode = 'query-offload' | 'batch' | 'materialize';
 // Predicates available for each subject type
 const predicatesBySubjectType: Record<string, string[]> = {
   order: ['order_status', 'order_number', 'delivery_window_start', 'delivery_window_end'],
-  orderline: ['quantity', 'order_line_unit_price', 'line_sequence', 'perishable_flag'],
+  orderline: ['quantity', 'order_line_unit_price', 'line_sequence'],  // perishable_flag is derived from product
   customer: ['customer_name', 'customer_email', 'customer_address'],
   store: ['store_name', 'store_zone', 'store_address'],
   product: ['product_name', 'category', 'unit_price', 'perishable', 'unit_weight_grams'],
   inventory: ['stock_level', 'replenishment_eta'],
   courier: ['courier_name', 'courier_phone', 'courier_status'],
   task: ['task_status', 'assigned_to', 'eta'],
+};
+
+// Example placeholder values for each predicate
+const placeholdersByPredicate: Record<string, string> = {
+  // Order predicates
+  order_status: 'DELIVERED',
+  order_number: 'FM-1234',
+  delivery_window_start: '2025-01-15T10:00:00',
+  delivery_window_end: '2025-01-15T12:00:00',
+  // Order line predicates (perishable_flag is derived from product, not stored)
+  quantity: '5',
+  order_line_unit_price: '12.99',
+  line_sequence: '1',
+  // Customer predicates
+  customer_name: 'John Doe',
+  customer_email: 'john@example.com',
+  customer_address: '123 Main St',
+  // Store predicates
+  store_name: 'Downtown Market',
+  store_zone: 'MAN',
+  store_address: '456 Broadway',
+  // Product predicates
+  product_name: 'Organic Apples',
+  category: 'Produce',
+  unit_price: '4.99',
+  perishable: 'true',
+  unit_weight_grams: '500',
+  // Inventory predicates
+  stock_level: '100',
+  replenishment_eta: '2025-01-16T08:00:00',
+  // Courier predicates
+  courier_name: 'Alex Smith',
+  courier_phone: '555-0123',
+  courier_status: 'AVAILABLE',
+  // Task predicates
+  task_status: 'ASSIGNED',
+  assigned_to: 'courier:C-001',
+  eta: '2025-01-15T11:30:00',
 };
 
 // Status badge component
@@ -748,7 +786,7 @@ export default function QueryStatisticsPage() {
               value={tripleValue}
               onChange={(e) => setTripleValue(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
-              placeholder="DELIVERED"
+              placeholder={placeholdersByPredicate[triplePredicate] || 'value'}
             />
           </div>
           <button

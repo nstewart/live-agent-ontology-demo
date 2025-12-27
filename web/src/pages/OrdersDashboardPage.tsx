@@ -620,13 +620,8 @@ export default function OrdersDashboardPage() {
               predicate: "line_sequence",
               object_value: String(index + 1),
               object_type: "int",
-            },
-            {
-              subject_id: lineItemId,
-              predicate: "perishable_flag",
-              object_value: String(item.perishable_flag).toLowerCase(),
-              object_type: "bool",
             }
+            // Note: perishable_flag is NOT stored - it is derived from the product's perishable attribute
           );
         });
       }
@@ -652,6 +647,7 @@ export default function OrdersDashboardPage() {
     if (!originalItems || originalItems.length !== newItems.length) return true;
 
     // Compare each line item
+    // Note: perishable_flag is NOT compared - it is derived from the product's perishable attribute
     for (let i = 0; i < originalItems.length; i++) {
       const original = originalItems[i];
       const newItem = newItems[i];
@@ -659,8 +655,7 @@ export default function OrdersDashboardPage() {
       if (
         original.product_id !== newItem.product_id ||
         original.quantity !== newItem.quantity ||
-        Number(original.unit_price) !== Number(newItem.unit_price) ||
-        original.perishable_flag !== newItem.perishable_flag
+        Number(original.unit_price) !== Number(newItem.unit_price)
       ) {
         return true;
       }
@@ -702,13 +697,13 @@ export default function OrdersDashboardPage() {
       }
 
       // Only include line items if they actually changed
+      // Note: perishable_flag is NOT included - it is derived from the product's perishable attribute
       if (hasLineItemsChanged(order.line_items, lineItems)) {
         updateData.line_items = lineItems.map((item, index) => ({
           product_id: item.product_id,
           quantity: item.quantity,
           unit_price: item.unit_price,
           line_sequence: index + 1,
-          perishable_flag: item.perishable_flag,
         }));
       }
 
