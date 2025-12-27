@@ -78,6 +78,7 @@ const orders_with_lines_mv = table('orders_with_lines_mv')
     customer_id: string().optional(),
     delivery_window_start: string().optional(),
     delivery_window_end: string().optional(),
+    order_created_at: number().optional(),
     order_total_amount: number().optional(),
     effective_updated_at: number().optional(),
     line_items: json<OrderLineItem[]>(),

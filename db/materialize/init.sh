@@ -149,6 +149,7 @@ SELECT
     MAX(CASE WHEN o.predicate = 'placed_by' THEN o.object_value END) AS customer_id,
     MAX(CASE WHEN o.predicate = 'delivery_window_start' THEN o.object_value END) AS delivery_window_start,
     MAX(CASE WHEN o.predicate = 'delivery_window_end' THEN o.object_value END) AS delivery_window_end,
+    MAX(CASE WHEN o.predicate = 'order_created_at' THEN o.object_value END)::TIMESTAMPTZ AS order_created_at,
     -- COMPUTED from line items (not from triple) - auto-calculated, always accurate
     COALESCE(ot.computed_total, 0.00)::DECIMAL(10,2) AS order_total_amount,
     MAX(o.updated_at) AS effective_updated_at
@@ -675,6 +676,7 @@ SELECT
     o.customer_id,
     o.delivery_window_start,
     o.delivery_window_end,
+    o.order_created_at,
     o.order_total_amount,
     -- Customer fields for search
     c.customer_name,
@@ -730,6 +732,7 @@ GROUP BY
     o.customer_id,
     o.delivery_window_start,
     o.delivery_window_end,
+    o.order_created_at,
     o.order_total_amount,
     o.effective_updated_at,
     c.customer_name,

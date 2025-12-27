@@ -115,13 +115,15 @@ export default function CouriersSchedulePage() {
         ? waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length
         : null
 
-      // Calculate orders at risk (within 30 min of delivery window end)
+      // Calculate orders at risk (waiting more than 3 minutes for courier assignment)
       const atRisk = storeOrders.filter(o => {
         if (o.order_status === 'DELIVERED' || o.order_status === 'CANCELLED') return false
-        if (!o.delivery_window_end) return false
-        const windowEnd = new Date(o.delivery_window_end).getTime()
-        const timeRemaining = windowEnd - now
-        return timeRemaining > 0 && timeRemaining <= 30 * 60 * 1000 // within 30 minutes
+        if (o.order_status !== 'CREATED') return false // Only count orders still in queue
+        if (!o.order_created_at) return false
+        // order_created_at is epoch milliseconds from Zero
+        const createdAt = typeof o.order_created_at === 'number' ? o.order_created_at : new Date(o.order_created_at).getTime()
+        const waitTime = now - createdAt
+        return waitTime > 3 * 60 * 1000 // waiting more than 3 minutes
       }).length
 
       return {
