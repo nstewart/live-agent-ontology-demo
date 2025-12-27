@@ -792,10 +792,7 @@ export default function QueryStatisticsPage() {
       </div>
 
       {/* Order Cards - conditional rendering based on view mode */}
-      <div className={`grid gap-4 mb-6 ${
-        viewMode === 'query-offload' ? 'grid-cols-1' :
-        viewMode === 'batch' ? 'grid-cols-2' : 'grid-cols-3'
-      }`}>
+      <div className="grid grid-cols-3 gap-4 mb-6">
         {/* PostgreSQL VIEW - shown in all modes */}
         <OrderCard
           title="PostgreSQL VIEW"
