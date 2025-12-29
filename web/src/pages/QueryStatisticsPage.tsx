@@ -99,6 +99,123 @@ const placeholdersByPredicate: Record<string, string> = {
   eta: '2025-01-15T11:30:00',
 };
 
+// Highlighted JSON component that glows when values change
+const HighlightedJson = ({ data }: { data: object }) => {
+  const prevDataRef = useRef<string>('');
+  const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
+
+  // Find changed paths by comparing JSON
+  useEffect(() => {
+    const currentJson = JSON.stringify(data);
+    if (prevDataRef.current && prevDataRef.current !== currentJson) {
+      // Find which paths changed
+      const prevData = JSON.parse(prevDataRef.current);
+      const newChangedPaths = new Set<string>();
+
+      const findChanges = (current: unknown, previous: unknown, path: string) => {
+        if (typeof current !== typeof previous) {
+          newChangedPaths.add(path);
+          return;
+        }
+        if (current === null || previous === null) {
+          if (current !== previous) newChangedPaths.add(path);
+          return;
+        }
+        if (typeof current !== 'object') {
+          if (current !== previous) newChangedPaths.add(path);
+          return;
+        }
+        if (Array.isArray(current) && Array.isArray(previous)) {
+          if (current.length !== previous.length) {
+            newChangedPaths.add(path);
+          }
+          current.forEach((item, i) => {
+            findChanges(item, previous[i], `${path}[${i}]`);
+          });
+          return;
+        }
+        const currentObj = current as Record<string, unknown>;
+        const previousObj = previous as Record<string, unknown>;
+        const allKeys = new Set([...Object.keys(currentObj), ...Object.keys(previousObj)]);
+        allKeys.forEach(key => {
+          findChanges(currentObj[key], previousObj[key], path ? `${path}.${key}` : key);
+        });
+      };
+
+      findChanges(data, prevData, '');
+      setChangedPaths(newChangedPaths);
+
+      // Clear highlights after animation
+      const timer = setTimeout(() => setChangedPaths(new Set()), 1500);
+      return () => clearTimeout(timer);
+    }
+    prevDataRef.current = currentJson;
+  }, [data]);
+
+  // Render JSON with highlights
+  const renderValue = (value: unknown, path: string, indent: number): React.ReactNode => {
+    const isChanged = changedPaths.has(path);
+    const glowClass = isChanged ? 'animate-pulse bg-yellow-500/30 rounded px-1 -mx-1' : '';
+    const spaces = '  '.repeat(indent);
+
+    if (value === null) {
+      return <span className={`text-gray-500 ${glowClass}`}>null</span>;
+    }
+    if (typeof value === 'boolean') {
+      return <span className={`text-purple-400 ${glowClass}`}>{value ? 'true' : 'false'}</span>;
+    }
+    if (typeof value === 'number') {
+      return <span className={`text-blue-400 ${glowClass}`}>{value}</span>;
+    }
+    if (typeof value === 'string') {
+      return <span className={`text-green-400 ${glowClass}`}>"{value}"</span>;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return <span className={glowClass}>[]</span>;
+      return (
+        <>
+          {'[\n'}
+          {value.map((item, i) => (
+            <span key={i}>
+              {spaces}  {renderValue(item, `${path}[${i}]`, indent + 1)}
+              {i < value.length - 1 ? ',' : ''}{'\n'}
+            </span>
+          ))}
+          {spaces}{']'}
+        </>
+      );
+    }
+    if (typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) return <span className={glowClass}>{'{}'}</span>;
+      return (
+        <>
+          {'{\n'}
+          {entries.map(([key, val], i) => {
+            const keyPath = path ? `${path}.${key}` : key;
+            const isKeyChanged = changedPaths.has(keyPath);
+            const keyGlowClass = isKeyChanged ? 'animate-pulse bg-yellow-500/30 rounded px-1 -mx-1' : '';
+            return (
+              <span key={key}>
+                {spaces}  <span className={`text-gray-400 ${keyGlowClass}`}>"{key}"</span>: {renderValue(val, keyPath, indent + 1)}
+                {i < entries.length - 1 ? ',' : ''}{'\n'}
+              </span>
+            );
+          })}
+          {spaces}{'}'}
+        </>
+      );
+    }
+    return String(value);
+  };
+
+  return (
+    <pre className="text-xs font-mono text-gray-300 whitespace-pre">
+      {renderValue(data, '', 0)}
+    </pre>
+  );
+};
+
 // Status badge component
 const StatusBadge = ({ status }: { status: string | null }) => {
   const getStatusColor = (s: string | null) => {
@@ -766,7 +883,37 @@ export default function QueryStatisticsPage() {
         </button>
         {lineageGraphOpen && (
           <div className="p-6 pt-0">
-            <LineageGraph />
+            <div className="flex gap-6">
+              {/* Left: Lineage Graph */}
+              <div className="flex-[3]">
+                <LineageGraph />
+              </div>
+              {/* Right: JSON API Response - height matches LineageGraph (legend + 350px graph + description) */}
+              <div className="flex-[2] flex flex-col">
+                <div className="bg-gray-900 rounded-lg overflow-hidden flex flex-col h-[430px]">
+                  {/* Header */}
+                  <div className="px-4 py-3 bg-gray-800 border-b border-gray-700 flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                      <Database className="h-4 w-4 text-blue-400" />
+                      <span className="text-sm font-medium text-gray-200">API Response</span>
+                    </div>
+                    <div className="mt-2 font-mono text-xs text-gray-400">
+                      <span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv
+                      <br />
+                      <span className="text-purple-400">WHERE</span> order_id = <span className="text-green-400">'{selectedOrderId || '...'}'</span>
+                    </div>
+                  </div>
+                  {/* JSON Content */}
+                  <div className="flex-1 overflow-auto p-4">
+                    {zeroMaterializeOrder ? (
+                      <HighlightedJson data={zeroMaterializeOrder} />
+                    ) : (
+                      <pre className="text-xs font-mono text-gray-500">Select an order to see live data...</pre>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
