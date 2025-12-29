@@ -797,8 +797,8 @@ export default function QueryStatisticsPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      {/* Header - Sticky */}
+      <div className="flex justify-between items-center mb-6 sticky top-0 z-10 bg-gray-50 -mx-6 px-6 py-4 -mt-6">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">IVM Demo</h1>
