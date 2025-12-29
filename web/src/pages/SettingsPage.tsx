@@ -21,15 +21,17 @@ export default function SettingsPage() {
   })
 
   // Load generator queries
-  const { data: loadgenStatus, isLoading: statusLoading } = useQuery({
+  const { data: loadgenStatus, isLoading: statusLoading, error: statusError } = useQuery({
     queryKey: ['loadgen-status'],
     queryFn: () => loadgenApi.getStatus().then(r => r.data),
     refetchInterval: 2000, // Poll every 2 seconds
+    retry: 3,
   })
 
-  const { data: profiles } = useQuery({
+  const { data: profiles, error: profilesError } = useQuery({
     queryKey: ['loadgen-profiles'],
     queryFn: () => loadgenApi.getProfiles().then(r => r.data),
+    retry: 3,
   })
 
   const startMutation = useMutation({
@@ -126,7 +128,12 @@ export default function SettingsPage() {
             Load Generator
           </h2>
           <div className="flex items-center gap-2">
-            {statusLoading ? (
+            {statusError || profilesError ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+                <XCircle className="h-3 w-3" />
+                Service Unavailable
+              </span>
+            ) : statusLoading ? (
               <span className="text-sm text-gray-500">Loading...</span>
             ) : isRunning ? (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
@@ -202,7 +209,13 @@ export default function SettingsPage() {
             <input
               type="number"
               value={durationOverride}
-              onChange={(e) => setDurationOverride(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value
+                // Only allow positive integers or empty string
+                if (value === '' || (!isNaN(Number(value)) && Number(value) > 0)) {
+                  setDurationOverride(value)
+                }
+              }}
               placeholder={selectedProfileInfo?.duration_minutes?.toString() || 'Unlimited'}
               disabled={isRunning || isStopping}
               className="w-full px-3 py-2 border rounded-lg disabled:bg-gray-100 disabled:text-gray-500"
@@ -254,9 +267,21 @@ export default function SettingsPage() {
         </div>
 
         {/* Error Display */}
-        {(startMutation.isError || stopMutation.isError) && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {startMutation.error?.message || stopMutation.error?.message || 'An error occurred'}
+        {(startMutation.isError || stopMutation.isError || statusError || profilesError) && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <XCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm">
+                <p className="font-medium text-red-800">Load Generator Error</p>
+                <p className="text-red-700 mt-1">
+                  {startMutation.error?.message ||
+                   stopMutation.error?.message ||
+                   statusError?.message ||
+                   profilesError?.message ||
+                   'Failed to connect to load generator service. Please check that the service is running.'}
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </div>

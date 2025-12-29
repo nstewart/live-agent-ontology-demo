@@ -15,6 +15,25 @@ router = APIRouter(prefix="/loadgen", tags=["Load Generator"])
 # Load generator service URL (runs as separate container)
 LOADGEN_SERVICE_URL = os.environ.get("LOADGEN_SERVICE_URL", "http://load-generator:8084")
 
+# Shared HTTP client for connection pooling
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared HTTP client for connection pooling."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
+
+async def close_http_client():
+    """Close the shared HTTP client (called on shutdown)."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
 
 class ProfileInfo(BaseModel):
     """Profile information."""
@@ -60,28 +79,36 @@ class MetricsResponse(BaseModel):
 
 async def _proxy_get(path: str) -> dict:
     """Proxy GET request to load generator service."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        try:
-            response = await client.get(f"{LOADGEN_SERVICE_URL}{path}")
-            response.raise_for_status()
-            return response.json()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=503, detail="Load generator service unavailable")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    client = get_http_client()
+    try:
+        response = await client.get(f"{LOADGEN_SERVICE_URL}{path}")
+        response.raise_for_status()
+        return response.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Load generator service unavailable")
+    except httpx.HTTPStatusError as e:
+        # Sanitize error message to avoid exposing internal details
+        raise HTTPException(status_code=e.response.status_code, detail="Load generator request failed")
+    except Exception as e:
+        logger.error(f"Unexpected error proxying GET {path}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def _proxy_post(path: str, data: dict = None) -> dict:
     """Proxy POST request to load generator service."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.post(f"{LOADGEN_SERVICE_URL}{path}", json=data)
-            response.raise_for_status()
-            return response.json()
-        except httpx.ConnectError:
-            raise HTTPException(status_code=503, detail="Load generator service unavailable")
-        except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    client = get_http_client()
+    try:
+        response = await client.post(f"{LOADGEN_SERVICE_URL}{path}", json=data)
+        response.raise_for_status()
+        return response.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Load generator service unavailable")
+    except httpx.HTTPStatusError as e:
+        # Sanitize error message to avoid exposing internal details
+        raise HTTPException(status_code=e.response.status_code, detail="Load generator request failed")
+    except Exception as e:
+        logger.error(f"Unexpected error proxying POST {path}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/profiles", response_model=list[ProfileInfo])

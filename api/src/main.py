@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down...")
     stop_heartbeat_generator()
+    # Close HTTP client for load generator proxy
+    from src.routes.loadgen import close_http_client
+    await close_http_client()
     await close_connections()
 
 

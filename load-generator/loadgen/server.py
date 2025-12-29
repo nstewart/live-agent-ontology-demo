@@ -2,13 +2,14 @@
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -68,7 +69,16 @@ class ServerState:
     duration_minutes: Optional[int] = None
 
 
-state = ServerState()
+# Global state instance - initialized once and injected via dependency
+_state: Optional[ServerState] = None
+
+
+def get_state() -> ServerState:
+    """Get or create the global state instance (dependency injection)."""
+    global _state
+    if _state is None:
+        _state = ServerState()
+    return _state
 
 
 @asynccontextmanager
@@ -77,6 +87,7 @@ async def lifespan(app: FastAPI):
     logger.info("Load generator control server starting...")
     yield
     # Stop orchestrator on shutdown
+    state = get_state()
     if state.orchestrator and state.status == Status.RUNNING:
         logger.info("Stopping load generator on shutdown...")
         state.orchestrator.stop_requested = True
@@ -96,9 +107,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS configuration - use environment variable or default to localhost for dev
+# In production, set CORS_ORIGINS to specific allowed origins
+cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -126,7 +140,7 @@ async def list_profiles():
 
 
 @app.get("/status", response_model=StatusResponse)
-async def get_status():
+async def get_status(state: ServerState = Depends(get_state)):
     """Get current load generator status."""
     # Check if task is done
     if state.run_task and state.run_task.done():
@@ -143,7 +157,7 @@ async def get_status():
 
 
 @app.get("/metrics", response_model=MetricsResponse)
-async def get_metrics():
+async def get_metrics(state: ServerState = Depends(get_state)):
     """Get current metrics from running load generator."""
     if not state.orchestrator or state.status != Status.RUNNING:
         return MetricsResponse()
@@ -167,10 +181,8 @@ async def get_metrics():
 
 
 @app.post("/start", response_model=StatusResponse)
-async def start(request: StartRequest):
+async def start(request: StartRequest, state: ServerState = Depends(get_state)):
     """Start the load generator."""
-    global state
-
     if state.status == Status.RUNNING:
         raise HTTPException(status_code=400, detail="Load generator is already running")
 
@@ -220,10 +232,8 @@ async def start(request: StartRequest):
 
 
 @app.post("/stop", response_model=StatusResponse)
-async def stop():
+async def stop(state: ServerState = Depends(get_state)):
     """Stop the load generator."""
-    global state
-
     if state.status != Status.RUNNING or not state.orchestrator:
         return StatusResponse(
             status=Status.STOPPED,
