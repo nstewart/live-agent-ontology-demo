@@ -100,34 +100,46 @@ const placeholdersByPredicate: Record<string, string> = {
 };
 
 // Highlighted JSON component that glows when values change
-const HighlightedJson = ({ data }: { data: object }) => {
+const HighlightedJson = ({ data, trackingKey }: { data: object; trackingKey?: string }) => {
   const prevDataRef = useRef<string>('');
-  const [changedPaths, setChangedPaths] = useState<Set<string>>(new Set());
+  const prevTrackingKeyRef = useRef<string | undefined>(undefined);
+  const changedPathsRef = useRef<Map<string, number>>(new Map());
+  const [, forceUpdate] = useState(0);
+
+  const HIGHLIGHT_DURATION = 1500; // ms
 
   // Find changed paths by comparing JSON
   useEffect(() => {
+    // Reset when tracking key changes (e.g., different order selected)
+    if (trackingKey !== prevTrackingKeyRef.current) {
+      prevTrackingKeyRef.current = trackingKey;
+      prevDataRef.current = JSON.stringify(data);
+      changedPathsRef.current = new Map();
+      return;
+    }
+
     const currentJson = JSON.stringify(data);
     if (prevDataRef.current && prevDataRef.current !== currentJson) {
       // Find which paths changed
       const prevData = JSON.parse(prevDataRef.current);
-      const newChangedPaths = new Set<string>();
+      const now = Date.now();
 
       const findChanges = (current: unknown, previous: unknown, path: string) => {
         if (typeof current !== typeof previous) {
-          newChangedPaths.add(path);
+          changedPathsRef.current.set(path, now);
           return;
         }
         if (current === null || previous === null) {
-          if (current !== previous) newChangedPaths.add(path);
+          if (current !== previous) changedPathsRef.current.set(path, now);
           return;
         }
         if (typeof current !== 'object') {
-          if (current !== previous) newChangedPaths.add(path);
+          if (current !== previous) changedPathsRef.current.set(path, now);
           return;
         }
         if (Array.isArray(current) && Array.isArray(previous)) {
           if (current.length !== previous.length) {
-            newChangedPaths.add(path);
+            changedPathsRef.current.set(path, now);
           }
           current.forEach((item, i) => {
             findChanges(item, previous[i], `${path}[${i}]`);
@@ -143,18 +155,35 @@ const HighlightedJson = ({ data }: { data: object }) => {
       };
 
       findChanges(data, prevData, '');
-      setChangedPaths(newChangedPaths);
+      forceUpdate(n => n + 1);
 
-      // Clear highlights after animation
-      const timer = setTimeout(() => setChangedPaths(new Set()), 1500);
+      // Schedule cleanup of expired highlights
+      const timer = setTimeout(() => {
+        const now = Date.now();
+        for (const [path, timestamp] of changedPathsRef.current) {
+          if (now - timestamp >= HIGHLIGHT_DURATION) {
+            changedPathsRef.current.delete(path);
+          }
+        }
+        forceUpdate(n => n + 1);
+      }, HIGHLIGHT_DURATION);
+
+      prevDataRef.current = currentJson;
       return () => clearTimeout(timer);
     }
     prevDataRef.current = currentJson;
-  }, [data]);
+  }, [data, trackingKey]);
+
+  // Check if a path is currently highlighted
+  const isHighlighted = (path: string): boolean => {
+    const timestamp = changedPathsRef.current.get(path);
+    if (!timestamp) return false;
+    return Date.now() - timestamp < HIGHLIGHT_DURATION;
+  };
 
   // Render JSON with highlights
   const renderValue = (value: unknown, path: string, indent: number): React.ReactNode => {
-    const isChanged = changedPaths.has(path);
+    const isChanged = isHighlighted(path);
     const glowClass = isChanged ? 'animate-pulse bg-yellow-500/30 rounded px-1 -mx-1' : '';
     const spaces = '  '.repeat(indent);
 
@@ -193,7 +222,7 @@ const HighlightedJson = ({ data }: { data: object }) => {
           {'{\n'}
           {entries.map(([key, val], i) => {
             const keyPath = path ? `${path}.${key}` : key;
-            const isKeyChanged = changedPaths.has(keyPath);
+            const isKeyChanged = isHighlighted(keyPath);
             const keyGlowClass = isKeyChanged ? 'animate-pulse bg-yellow-500/30 rounded px-1 -mx-1' : '';
             return (
               <span key={key}>
@@ -906,7 +935,7 @@ export default function QueryStatisticsPage() {
                   {/* JSON Content */}
                   <div className="flex-1 overflow-auto p-4">
                     {zeroMaterializeOrder ? (
-                      <HighlightedJson data={zeroMaterializeOrder} />
+                      <HighlightedJson data={zeroMaterializeOrder} trackingKey={selectedOrderId} />
                     ) : (
                       <pre className="text-xs font-mono text-gray-500">Select an order to see live data...</pre>
                     )}
