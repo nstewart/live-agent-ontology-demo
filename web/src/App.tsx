@@ -29,7 +29,7 @@ const navItems = [
   { path: '/orders', icon: ShoppingCart, label: 'Orders' },
   { path: '/stores', icon: Warehouse, label: 'Stores & Inventory' },
   { path: '/couriers', icon: Truck, label: 'Couriers' },
-  { path: '/ontology', icon: Database, label: 'Ontology' },
+  { path: '/ontology', icon: Database, label: 'Knowledge Graph (Ontology)' },
   { path: '/triples', icon: Package, label: 'Triples Browser' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ]
