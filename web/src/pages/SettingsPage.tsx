@@ -175,7 +175,7 @@ export default function SettingsPage() {
         )}
 
         {/* Controls */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Profile Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Profile</label>
@@ -210,76 +210,53 @@ export default function SettingsPage() {
             />
             <p className="text-xs text-gray-500 mt-1">Leave empty for profile default</p>
           </div>
+        </div>
 
-          {/* Start/Stop Button */}
-          <div className="flex items-end">
-            {isRunning || isStopping ? (
-              <button
-                onClick={() => stopMutation.mutate()}
-                disabled={isStopping || stopMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium rounded-lg transition-colors"
-              >
-                {stopMutation.isPending || isStopping ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Stopping...
-                  </>
-                ) : (
-                  <>
-                    <Square className="h-4 w-4" />
-                    Stop Traffic
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={() => startMutation.mutate()}
-                disabled={startMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium rounded-lg transition-colors"
-              >
-                {startMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    Start Traffic
-                  </>
-                )}
-              </button>
-            )}
-          </div>
+        {/* Start/Stop Button */}
+        <div className="mt-4">
+          {isRunning || isStopping ? (
+            <button
+              onClick={() => stopMutation.mutate()}
+              disabled={isStopping || stopMutation.isPending}
+              className="flex items-center justify-center gap-2 px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium rounded-lg transition-colors"
+            >
+              {stopMutation.isPending || isStopping ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Stopping...
+                </>
+              ) : (
+                <>
+                  <Square className="h-4 w-4" />
+                  Stop Traffic
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={() => startMutation.mutate()}
+              disabled={startMutation.isPending}
+              className="flex items-center justify-center gap-2 px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white font-medium rounded-lg transition-colors"
+            >
+              {startMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  Start Traffic
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Error Display */}
         {(startMutation.isError || stopMutation.isError) && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
             {startMutation.error?.message || stopMutation.error?.message || 'An error occurred'}
-          </div>
-        )}
-
-        {/* Profile Details */}
-        {profiles && !isRunning && (
-          <div className="mt-4 pt-4 border-t">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Available Profiles</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {profiles.map((profile: LoadGenProfileInfo) => (
-                <div
-                  key={profile.name}
-                  className={`p-2 rounded border text-xs ${
-                    selectedProfile === profile.name
-                      ? 'border-green-500 bg-green-50'
-                      : 'border-gray-200 bg-gray-50'
-                  }`}
-                >
-                  <div className="font-medium">{profile.name.toUpperCase()}</div>
-                  <div className="text-gray-500">{profile.orders_per_minute} orders/min</div>
-                  <div className="text-gray-500">{profile.concurrent_workflows} workers</div>
-                </div>
-              ))}
-            </div>
           </div>
         )}
       </div>
