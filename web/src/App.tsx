@@ -6,13 +6,11 @@ import {
   Warehouse,
   Truck,
   Settings,
-  Network,
   TrendingUp,
   BarChart3,
 } from 'lucide-react'
 
-import OntologyClassesPage from './pages/OntologyClassesPage'
-import OntologyPropertiesPage from './pages/OntologyPropertiesPage'
+import OntologyPage from './pages/OntologyPage'
 import TriplesBrowserPage from './pages/TriplesBrowserPage'
 import OrdersDashboardPage from './pages/OrdersDashboardPage'
 import StoresInventoryPage from './pages/StoresInventoryPage'
@@ -31,8 +29,7 @@ const navItems = [
   { path: '/orders', icon: ShoppingCart, label: 'Orders' },
   { path: '/stores', icon: Warehouse, label: 'Stores & Inventory' },
   { path: '/couriers', icon: Truck, label: 'Couriers' },
-  { path: '/ontology/classes', icon: Database, label: 'Ontology Classes' },
-  { path: '/ontology/properties', icon: Network, label: 'Properties' },
+  { path: '/ontology', icon: Database, label: 'Ontology' },
   { path: '/triples', icon: Package, label: 'Triples Browser' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ]
@@ -77,8 +74,7 @@ function App() {
                 <Route path="/orders" element={<OrdersDashboardPage />} />
                 <Route path="/stores" element={<StoresInventoryPage />} />
                 <Route path="/couriers" element={<CouriersSchedulePage />} />
-                <Route path="/ontology/classes" element={<OntologyClassesPage />} />
-                <Route path="/ontology/properties" element={<OntologyPropertiesPage />} />
+                <Route path="/ontology" element={<OntologyPage />} />
                 <Route path="/triples" element={<TriplesBrowserPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Routes>
