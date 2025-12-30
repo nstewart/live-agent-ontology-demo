@@ -54,6 +54,255 @@ function Sparkline({
   )
 }
 
+// Stacked area chart for system-wide metrics
+function StackedAreaChart({
+  data1,
+  data2,
+  label1,
+  label2,
+  color1 = '#6366f1',
+  color2 = '#a5b4fc',
+  width = 280,
+  height = 100,
+}: {
+  data1: number[],
+  data2: number[],
+  label1: string,
+  label2: string,
+  color1?: string,
+  color2?: string,
+  width?: number,
+  height?: number,
+}) {
+  if (data1.length < 2) {
+    return <div className="w-full h-24 bg-gray-100 rounded animate-pulse" />
+  }
+
+  const padding = { top: 10, right: 10, bottom: 20, left: 35 }
+  const chartWidth = width - padding.left - padding.right
+  const chartHeight = height - padding.top - padding.bottom
+
+  // Stack the data
+  const stacked = data1.map((v, i) => v + (data2[i] || 0))
+  const maxVal = Math.max(...stacked, 1)
+  const currentTotal = stacked[stacked.length - 1] || 0
+
+  // Generate area paths
+  const getY = (val: number) => chartHeight - (val / maxVal) * chartHeight
+
+  // Bottom area (data1)
+  const area1Points = data1.map((v, i) => {
+    const x = (i / (data1.length - 1)) * chartWidth
+    const y = getY(v)
+    return `${x},${y}`
+  })
+  const area1Path = `M0,${chartHeight} L${area1Points.join(' L')} L${chartWidth},${chartHeight} Z`
+
+  // Top area (stacked)
+  const area2Points = stacked.map((v, i) => {
+    const x = (i / (stacked.length - 1)) * chartWidth
+    const y = getY(v)
+    return `${x},${y}`
+  })
+  const area2BottomPoints = [...data1].reverse().map((v, i) => {
+    const x = ((data1.length - 1 - i) / (data1.length - 1)) * chartWidth
+    const y = getY(v)
+    return `${x},${y}`
+  })
+  const area2Path = `M${area2Points.join(' L')} L${area2BottomPoints.join(' L')} Z`
+
+  // Y-axis ticks
+  const yTicks = [0, Math.round(maxVal / 2), Math.round(maxVal)]
+
+  return (
+    <div className="relative">
+      <svg width={width} height={height}>
+        <g transform={`translate(${padding.left}, ${padding.top})`}>
+          {/* Y-axis */}
+          {yTicks.map((tick, i) => (
+            <g key={i}>
+              <line
+                x1={0}
+                y1={getY(tick)}
+                x2={chartWidth}
+                y2={getY(tick)}
+                stroke="#e5e7eb"
+                strokeDasharray="2,2"
+              />
+              <text
+                x={-5}
+                y={getY(tick)}
+                textAnchor="end"
+                alignmentBaseline="middle"
+                className="text-[10px] fill-gray-400"
+              >
+                {tick}
+              </text>
+            </g>
+          ))}
+
+          {/* Stacked areas */}
+          <path d={area2Path} fill={color2} opacity={0.7} />
+          <path d={area1Path} fill={color1} opacity={0.9} />
+        </g>
+      </svg>
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-4 mt-1">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded" style={{ backgroundColor: color1 }} />
+          <span className="text-[10px] text-gray-500">{label1}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded" style={{ backgroundColor: color2 }} />
+          <span className="text-[10px] text-gray-500">{label2}</span>
+        </div>
+      </div>
+
+      {/* Current value badge */}
+      <div className="absolute top-1 right-1 bg-gray-900 text-white text-xs px-2 py-0.5 rounded">
+        {currentTotal}
+      </div>
+    </div>
+  )
+}
+
+// Line chart with optional secondary line
+function TimeSeriesLineChart({
+  data,
+  data2,
+  label,
+  label2,
+  color = '#f59e0b',
+  color2 = '#fcd34d',
+  width = 280,
+  height = 100,
+  unit = '',
+  decimals = 1,
+}: {
+  data: number[],
+  data2?: number[],
+  label: string,
+  label2?: string,
+  color?: string,
+  color2?: string,
+  width?: number,
+  height?: number,
+  unit?: string,
+  decimals?: number,
+}) {
+  if (data.length < 2) {
+    return <div className="w-full h-24 bg-gray-100 rounded animate-pulse" />
+  }
+
+  const padding = { top: 10, right: 10, bottom: 20, left: 35 }
+  const chartWidth = width - padding.left - padding.right
+  const chartHeight = height - padding.top - padding.bottom
+
+  const allData = data2 ? [...data, ...data2] : data
+  const maxVal = Math.max(...allData, 0.1)
+  const minVal = Math.min(...allData, 0)
+  const range = maxVal - minVal || 1
+  const currentVal = data[data.length - 1] || 0
+
+  const getY = (val: number) => chartHeight - ((val - minVal) / range) * chartHeight
+
+  // Primary line
+  const linePoints = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * chartWidth
+    const y = getY(v)
+    return `${x},${y}`
+  }).join(' ')
+
+  // Secondary line (optional)
+  const line2Points = data2?.map((v, i) => {
+    const x = (i / (data2.length - 1)) * chartWidth
+    const y = getY(v)
+    return `${x},${y}`
+  }).join(' ')
+
+  // Y-axis ticks
+  const yTicks = [minVal, (maxVal + minVal) / 2, maxVal]
+
+  return (
+    <div className="relative">
+      <svg width={width} height={height}>
+        <g transform={`translate(${padding.left}, ${padding.top})`}>
+          {/* Y-axis */}
+          {yTicks.map((tick, i) => (
+            <g key={i}>
+              <line
+                x1={0}
+                y1={getY(tick)}
+                x2={chartWidth}
+                y2={getY(tick)}
+                stroke="#e5e7eb"
+                strokeDasharray="2,2"
+              />
+              <text
+                x={-5}
+                y={getY(tick)}
+                textAnchor="end"
+                alignmentBaseline="middle"
+                className="text-[10px] fill-gray-400"
+              >
+                {tick.toFixed(decimals)}
+              </text>
+            </g>
+          ))}
+
+          {/* Secondary line (drawn first, behind primary) */}
+          {line2Points && (
+            <polyline
+              fill="none"
+              stroke={color2}
+              strokeWidth="1.5"
+              strokeDasharray="4,2"
+              points={line2Points}
+              opacity={0.7}
+            />
+          )}
+
+          {/* Primary line */}
+          <polyline
+            fill="none"
+            stroke={color}
+            strokeWidth="2"
+            points={linePoints}
+          />
+
+          {/* Current value dot */}
+          <circle
+            cx={chartWidth}
+            cy={getY(currentVal)}
+            r={4}
+            fill={color}
+          />
+        </g>
+      </svg>
+
+      {/* Legend */}
+      <div className="flex items-center justify-center gap-4 mt-1">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-0.5 rounded" style={{ backgroundColor: color }} />
+          <span className="text-[10px] text-gray-500">{label}</span>
+        </div>
+        {label2 && (
+          <div className="flex items-center gap-1">
+            <div className="w-3 h-0.5 rounded" style={{ backgroundColor: color2 }} />
+            <span className="text-[10px] text-gray-500">{label2}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Current value badge */}
+      <div className="absolute top-1 right-1 bg-gray-900 text-white text-xs px-2 py-0.5 rounded">
+        {currentVal.toFixed(decimals)}{unit}
+      </div>
+    </div>
+  )
+}
+
 // Delta indicator component showing change from previous value
 function DeltaIndicator({
   current,
@@ -129,9 +378,31 @@ export default function MetricsDashboardPage() {
   const [couriersData] = useQuery(z.query.courier_schedule_mv.orderBy('courier_id', 'asc'));
   const [ordersData] = useQuery(z.query.orders_with_lines_mv);
 
-  // Time-series data for sparklines (via direct API polling, not Zero)
+  // Time-series data for sparklines and rollup charts (via direct API polling, not Zero)
   // Zero doesn't support these views because Materialize lacks UNIQUE indexes
-  const { storeTimeseries, isLoading: timeseriesLoading } = useMetricsTimeseries(1000, 10);
+  const { storeTimeseries, systemTimeseries, isLoading: timeseriesLoading } = useMetricsTimeseries(1000, 10);
+
+  // Extract system-wide time-series arrays for charts
+  const systemChartData = useMemo(() => {
+    if (systemTimeseries.length === 0) {
+      return {
+        queueDepth: [],
+        inProgress: [],
+        totalOrders: [],
+        avgWait: [],
+        maxWait: [],
+        throughput: [],
+      }
+    }
+    return {
+      queueDepth: systemTimeseries.map(d => d.total_queue_depth),
+      inProgress: systemTimeseries.map(d => d.total_in_progress),
+      totalOrders: systemTimeseries.map(d => d.total_orders),
+      avgWait: systemTimeseries.map(d => d.avg_wait_minutes ?? 0),
+      maxWait: systemTimeseries.map(d => d.max_wait_minutes ?? 0),
+      throughput: systemTimeseries.map(d => d.total_orders_picked_up),
+    }
+  }, [systemTimeseries]);
 
   useEffect(() => {
     if (pricingYieldData.length > 0 || inventoryRiskData.length > 0 || capacityHealthData.length > 0) {
@@ -341,6 +612,72 @@ export default function MetricsDashboardPage() {
           </div>
           <div className="text-sm text-gray-600">
             {metrics.capacityHealth.criticalStores} critical, {metrics.capacityHealth.strainedStores} strained stores
+          </div>
+        </div>
+      </div>
+
+      {/* System Throughput Panel - Rolled up time-series from all stores */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-gray-900">System Throughput</h2>
+          <span className="text-xs text-gray-500">
+            Rolled up from {Object.keys(storeTimeseries).length} stores
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-6">
+          {/* Orders In Flight */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Orders In Flight</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Orders currently in queue or being processed
+            </p>
+            <StackedAreaChart
+              data1={systemChartData.queueDepth}
+              data2={systemChartData.inProgress}
+              label1="In Queue"
+              label2="In Progress"
+              color1="#6366f1"
+              color2="#a5b4fc"
+              width={280}
+              height={100}
+            />
+          </div>
+
+          {/* Wait Times */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Wait Times</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Time from order creation to courier pickup (minutes)
+            </p>
+            <TimeSeriesLineChart
+              data={systemChartData.avgWait}
+              data2={systemChartData.maxWait}
+              label="Avg"
+              label2="Max"
+              color="#f59e0b"
+              color2="#fcd34d"
+              width={280}
+              height={100}
+              unit="m"
+              decimals={2}
+            />
+          </div>
+
+          {/* Throughput */}
+          <div className="bg-white rounded-lg shadow p-4">
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Throughput</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              Orders picked up per minute window
+            </p>
+            <TimeSeriesLineChart
+              data={systemChartData.throughput}
+              label="Picked Up"
+              color="#10b981"
+              width={280}
+              height={100}
+              unit=""
+              decimals={0}
+            />
           </div>
         </div>
       </div>
