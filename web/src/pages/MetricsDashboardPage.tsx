@@ -131,7 +131,7 @@ export default function MetricsDashboardPage() {
 
   // Time-series data for sparklines (via direct API polling, not Zero)
   // Zero doesn't support these views because Materialize lacks UNIQUE indexes
-  const { storeTimeseries, isLoading: timeseriesLoading } = useMetricsTimeseries(5000, 10);
+  const { storeTimeseries, isLoading: timeseriesLoading } = useMetricsTimeseries(1000, 10);
 
   useEffect(() => {
     if (pricingYieldData.length > 0 || inventoryRiskData.length > 0 || capacityHealthData.length > 0) {
