@@ -135,7 +135,8 @@ migrate:
 	./db/scripts/run_migrations.sh
 
 seed:
-	@echo "Running database seeder..."
+	@echo "Building and running database seeder..."
+	docker-compose --profile seed build db-seed
 	docker-compose --profile seed run --rm db-seed
 
 reset-db:

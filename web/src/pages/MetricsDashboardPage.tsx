@@ -10,7 +10,33 @@ import {
   DollarSign,
   Package,
   Store,
+  Users,
+  Clock,
+  Truck,
 } from "lucide-react";
+
+type StoreMetrics = {
+  store_id: string
+  store_name: string
+  store_zone: string
+  total_couriers: number
+  available_couriers: number
+  busy_couriers: number
+  off_shift_couriers: number
+  orders_in_queue: number
+  orders_picking: number
+  orders_delivering: number
+  utilization_pct: number
+  health_status: 'HEALTHY' | 'WARNING' | 'CRITICAL'
+  avg_wait_minutes: number | null
+  orders_at_risk: number
+}
+
+const healthStatusColors = {
+  HEALTHY: 'bg-green-500',
+  WARNING: 'bg-yellow-500',
+  CRITICAL: 'bg-red-500',
+}
 
 export default function MetricsDashboardPage() {
   const z = useZero<Schema>();
@@ -20,6 +46,11 @@ export default function MetricsDashboardPage() {
   const [pricingYieldData] = useQuery(z.query.pricing_yield_mv);
   const [inventoryRiskData] = useQuery(z.query.inventory_risk_mv);
   const [capacityHealthData] = useQuery(z.query.store_capacity_health_mv);
+
+  // Additional data for Store Demand vs Capacity table
+  const [storesData] = useQuery(z.query.stores_mv.orderBy('store_id', 'asc'));
+  const [couriersData] = useQuery(z.query.courier_schedule_mv.orderBy('courier_id', 'asc'));
+  const [ordersData] = useQuery(z.query.orders_with_lines_mv);
 
   useEffect(() => {
     if (pricingYieldData.length > 0 || inventoryRiskData.length > 0 || capacityHealthData.length > 0) {
@@ -54,6 +85,85 @@ export default function MetricsDashboardPage() {
       capacityHealth: { criticalStores, strainedStores, avgUtilization },
     };
   }, [pricingYieldData, inventoryRiskData, capacityHealthData]);
+
+  // Compute store demand vs capacity metrics
+  const storeMetrics: StoreMetrics[] = useMemo(() => {
+    if (storesData.length === 0) return []
+
+    const now = Date.now()
+
+    return storesData.map((store) => {
+      // Count couriers by status for this store
+      const storeCouriers = couriersData.filter(c => c.home_store_id === store.store_id)
+      const total = storeCouriers.length
+      const available = storeCouriers.filter(c => c.courier_status === 'AVAILABLE').length
+      const busy = storeCouriers.filter(c => c.courier_status === 'PICKING' || c.courier_status === 'DELIVERING' || c.courier_status === 'ON_DELIVERY').length
+      const offShift = storeCouriers.filter(c => c.courier_status === 'OFF_SHIFT').length
+
+      // Count orders by status for this store
+      const storeOrders = ordersData.filter(o => o.store_id === store.store_id)
+      const inQueue = storeOrders.filter(o => o.order_status === 'CREATED').length
+      const picking = storeOrders.filter(o => o.order_status === 'PICKING').length
+      const delivering = storeOrders.filter(o => o.order_status === 'OUT_FOR_DELIVERY').length
+
+      // Calculate utilization
+      const utilization = total > 0 ? (busy / total) * 100 : 0
+
+      // Determine health status
+      let health: 'HEALTHY' | 'WARNING' | 'CRITICAL' = 'HEALTHY'
+      if (available === 0 && inQueue > 0) {
+        health = 'CRITICAL'
+      } else if (utilization >= 80 || (inQueue > available * 5)) {
+        health = 'WARNING'
+      }
+
+      // Calculate avg wait time from tasks with order_created_at and task_started_at
+      const waitTimes: number[] = []
+      storeCouriers.forEach(courier => {
+        const tasks = (courier.tasks as any[]) || []
+        tasks.forEach(task => {
+          if (task.order_created_at && task.task_started_at) {
+            const created = new Date(task.order_created_at).getTime()
+            const started = new Date(task.task_started_at).getTime()
+            if (started > created) {
+              waitTimes.push((started - created) / 60000) // minutes
+            }
+          }
+        })
+      })
+      const avgWait = waitTimes.length > 0
+        ? waitTimes.reduce((a, b) => a + b, 0) / waitTimes.length
+        : null
+
+      // Calculate orders at risk (waiting more than 3 minutes for courier assignment)
+      const atRisk = storeOrders.filter(o => {
+        if (o.order_status === 'DELIVERED' || o.order_status === 'CANCELLED') return false
+        if (o.order_status !== 'CREATED') return false // Only count orders still in queue
+        if (!o.order_created_at) return false
+        // order_created_at is epoch milliseconds from Zero
+        const createdAt = typeof o.order_created_at === 'number' ? o.order_created_at : new Date(o.order_created_at).getTime()
+        const waitTime = now - createdAt
+        return waitTime > 3 * 60 * 1000 // waiting more than 3 minutes
+      }).length
+
+      return {
+        store_id: store.store_id,
+        store_name: store.store_name || store.store_id,
+        store_zone: store.store_zone || '',
+        total_couriers: total,
+        available_couriers: available,
+        busy_couriers: busy,
+        off_shift_couriers: offShift,
+        orders_in_queue: inQueue,
+        orders_picking: picking,
+        orders_delivering: delivering,
+        utilization_pct: utilization,
+        health_status: health,
+        avg_wait_minutes: avgWait,
+        orders_at_risk: atRisk,
+      }
+    }).sort((a, b) => a.store_name.localeCompare(b.store_name))
+  }, [storesData, couriersData, ordersData]);
 
   return (
     <div className="p-6">
@@ -137,6 +247,125 @@ export default function MetricsDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Store Demand vs Capacity Table */}
+      {storeMetrics.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Store Demand vs Capacity</h2>
+          <div className="bg-white rounded-lg shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Store
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Zone
+                    </th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Health
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5" />
+                        Couriers
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Util
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Package className="h-3.5 w-3.5" />
+                        Queue
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Clock className="h-3.5 w-3.5" />
+                        Picking
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="flex items-center justify-end gap-1">
+                        <Truck className="h-3.5 w-3.5" />
+                        Delivering
+                      </span>
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Avg Wait
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      At Risk
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {storeMetrics.map((metrics) => (
+                    <tr key={metrics.store_id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm font-medium text-gray-900">{metrics.store_name}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-gray-500">{metrics.store_zone}</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-center">
+                        <span
+                          className={`inline-block w-3 h-3 rounded-full ${healthStatusColors[metrics.health_status]}`}
+                          title={metrics.health_status}
+                        />
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm text-gray-900">
+                          {metrics.available_couriers}/{metrics.total_couriers}
+                        </span>
+                        <span className="text-xs text-gray-500 ml-1">avail</span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm font-medium ${
+                          metrics.utilization_pct >= 80 ? 'text-red-600' :
+                          metrics.utilization_pct >= 50 ? 'text-yellow-600' :
+                          'text-green-600'
+                        }`}>
+                          {metrics.utilization_pct.toFixed(0)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm font-medium ${metrics.orders_in_queue > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {metrics.orders_in_queue}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm font-medium ${metrics.orders_picking > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {metrics.orders_picking}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm font-medium ${metrics.orders_delivering > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {metrics.orders_delivering}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm ${metrics.avg_wait_minutes !== null ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {metrics.avg_wait_minutes !== null ? `${metrics.avg_wait_minutes.toFixed(1)}m` : '-'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <span className={`text-sm font-medium ${
+                          metrics.orders_at_risk > 0 ? 'text-red-600' : 'text-gray-400'
+                        }`}>
+                          {metrics.orders_at_risk}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Detailed Tables */}
       <div className="grid grid-cols-2 gap-6">
