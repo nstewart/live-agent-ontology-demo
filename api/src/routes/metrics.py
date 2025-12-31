@@ -121,15 +121,15 @@ async def get_timeseries(
     system_query = text("""
         SELECT
             id,
-            snapshot_time as window_end,
-            COALESCE(queue_depth, 0) as total_queue_depth,
-            COALESCE(in_progress, 0) as total_in_progress,
-            COALESCE(queue_depth, 0) + COALESCE(in_progress, 0) as total_orders,
-            NULL::numeric as avg_wait_minutes,
-            NULL::numeric as max_wait_minutes,
-            COALESCE(delivered_this_minute, 0) as total_orders_picked_up
-        FROM system_state_snapshots_mv
-        ORDER BY snapshot_time DESC
+            window_end,
+            COALESCE(total_queue_depth, 0) as total_queue_depth,
+            COALESCE(total_in_progress, 0) as total_in_progress,
+            COALESCE(total_orders, 0) as total_orders,
+            avg_wait_minutes,
+            max_wait_minutes,
+            COALESCE(total_orders_picked_up, 0) as total_orders_picked_up
+        FROM system_metrics_timeseries_mv
+        ORDER BY window_end DESC
         LIMIT :limit
     """)
 
