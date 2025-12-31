@@ -16,6 +16,7 @@ set -e
 
 MZ_HOST=${MZ_HOST:-localhost}
 MZ_PORT=${MZ_PORT:-6875}
+MZ_SYSTEM_PORT=${MZ_SYSTEM_PORT:-6877}
 
 echo "Waiting for Materialize to be ready..."
 until psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "SELECT 1" > /dev/null 2>&1; do
@@ -26,10 +27,44 @@ echo "Materialize is ready!"
 
 echo "Setting up Three-Tier Architecture clusters..."
 
+# Determine compute cluster size based on available CPUs (subtract 2 for non-MZ services)
+CPUS=$(($(nproc) - 2))
+if (( CPUS < 1 )); then
+    CPUS=1
+fi
+
+if (( CPUS >= 64 )); then
+    COMPUTE_CLUSTER_SIZE="3200cc"
+elif (( CPUS >= 32 )); then
+    COMPUTE_CLUSTER_SIZE="1600cc"
+elif (( CPUS >= 24 )); then
+    COMPUTE_CLUSTER_SIZE="1200cc"
+elif (( CPUS >= 16 )); then
+    COMPUTE_CLUSTER_SIZE="800cc"
+elif (( CPUS >= 12 )); then
+    COMPUTE_CLUSTER_SIZE="600cc"
+elif (( CPUS >= 8 )); then
+    COMPUTE_CLUSTER_SIZE="400cc"
+elif (( CPUS >= 6 )); then
+    COMPUTE_CLUSTER_SIZE="300cc"
+elif (( CPUS >= 4 )); then
+    COMPUTE_CLUSTER_SIZE="200cc"
+elif (( CPUS >= 2 )); then
+    COMPUTE_CLUSTER_SIZE="100cc"
+else
+    COMPUTE_CLUSTER_SIZE="50cc"
+fi
+
+echo "Detected $((CPUS + 2)) CPUs, using $COMPUTE_CLUSTER_SIZE for compute cluster"
+
 # Create clusters (ignore errors if already exist)
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER ingest (SIZE = '25cc');" 2>/dev/null || echo "ingest cluster already exists"
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER compute (SIZE = '25cc');" 2>/dev/null || echo "compute cluster already exists"
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER serving (SIZE = '25cc');" 2>/dev/null || echo "serving cluster already exists"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER ingest (SIZE = '50cc');" 2>/dev/null || echo "ingest cluster already exists"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER compute (SIZE = '$COMPUTE_CLUSTER_SIZE');" 2>/dev/null || echo "compute cluster already exists"
+psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE CLUSTER serving (SIZE = '50cc');" 2>/dev/null || echo "serving cluster already exists"
+
+# Set serving as the default cluster and drop quickstart
+psql -h "$MZ_HOST" -p "$MZ_SYSTEM_PORT" -U mz_system -c "ALTER SYSTEM SET cluster = 'serving';" 2>/dev/null || echo "default cluster already set"
+psql -h "$MZ_HOST" -p "$MZ_SYSTEM_PORT" -U mz_system -c "DROP CLUSTER IF EXISTS quickstart CASCADE;" || echo "quickstart cluster already dropped"
 
 echo "Creating PostgreSQL connection..."
 
