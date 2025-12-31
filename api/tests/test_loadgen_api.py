@@ -2,7 +2,7 @@
 
 import pytest
 from httpx import AsyncClient
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, Mock
 
 
 def create_mock_response(json_data):
@@ -503,3 +503,96 @@ async def test_deprecated_output_endpoint(async_client: AsyncClient):
     data = response.json()
     assert "lines" in data
     assert "metrics" in data["lines"][0].lower()
+
+
+# ============== Input Validation Tests ==============
+
+@pytest.mark.asyncio
+async def test_start_supply_with_invalid_dispatch_interval(async_client: AsyncClient):
+    """Test that negative dispatch interval is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "dispatch_interval_seconds": -1.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_zero_dispatch_interval(async_client: AsyncClient):
+    """Test that zero dispatch interval is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "dispatch_interval_seconds": 0.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_excessive_dispatch_interval(async_client: AsyncClient):
+    """Test that dispatch interval above maximum is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "dispatch_interval_seconds": 61.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_invalid_picking_duration(async_client: AsyncClient):
+    """Test that negative picking duration is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "picking_duration_seconds": -5.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_excessive_picking_duration(async_client: AsyncClient):
+    """Test that picking duration above maximum is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "picking_duration_seconds": 301.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_invalid_delivery_duration(async_client: AsyncClient):
+    """Test that negative delivery duration is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "delivery_duration_seconds": -10.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data
+
+
+@pytest.mark.asyncio
+async def test_start_supply_with_excessive_delivery_duration(async_client: AsyncClient):
+    """Test that delivery duration above maximum is rejected."""
+    response = await async_client.post("/loadgen/supply/start", json={
+        "supply_config": "normal",
+        "delivery_duration_seconds": 301.0,
+    })
+
+    assert response.status_code == 422
+    data = response.json()
+    assert "detail" in data

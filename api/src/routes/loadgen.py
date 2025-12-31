@@ -6,7 +6,7 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +107,9 @@ class StartSupplyRequest(BaseModel):
     """Request to start supply generation."""
     profile: str = "demo"
     supply_config: str = "normal"
-    dispatch_interval_seconds: Optional[float] = None
-    picking_duration_seconds: Optional[float] = None
-    delivery_duration_seconds: Optional[float] = None
+    dispatch_interval_seconds: Optional[float] = Field(None, gt=0, le=60, description="Dispatch interval in seconds (must be > 0 and <= 60)")
+    picking_duration_seconds: Optional[float] = Field(None, gt=0, le=300, description="Picking duration in seconds (must be > 0 and <= 300)")
+    delivery_duration_seconds: Optional[float] = Field(None, gt=0, le=300, description="Delivery duration in seconds (must be > 0 and <= 300)")
     duration_minutes: Optional[int] = None
     api_url: Optional[str] = None
 
