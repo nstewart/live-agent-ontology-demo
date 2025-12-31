@@ -40,6 +40,7 @@ import {
 } from "../api/client";
 import { LineageGraph } from "../components/LineageGraph";
 import { WhatAreTriplesCard } from "../components/WhatAreTriplesCard";
+import { WhatIsKnowledgeGraphCard } from "../components/WhatIsKnowledgeGraphCard";
 
 interface ChartDataPoint {
   time: number;
@@ -1371,7 +1372,7 @@ export default function QueryStatisticsPage() {
       </div>
 
       {/* Reaction Time Chart (Collapsible) */}
-      <div className="bg-white rounded-lg shadow">
+      <div className="bg-white rounded-lg shadow mb-6">
         <button
           onClick={() => setReactionTimeGraphOpen(!reactionTimeGraphOpen)}
           className="w-full p-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
@@ -1486,6 +1487,9 @@ export default function QueryStatisticsPage() {
           </div>
         )}
       </div>
+
+      {/* What is a Knowledge Graph? Card */}
+      <WhatIsKnowledgeGraphCard />
     </div>
   );
 }
