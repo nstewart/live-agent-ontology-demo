@@ -11,9 +11,8 @@ export const AgentNativeReadsCard = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Perform search on submit
-  const performSearch = useCallback(async () => {
-    const query = searchQuery.trim();
+  // Execute search with a given query string
+  const executeSearch = useCallback(async (query: string) => {
     if (!query) {
       setSearchResult(null);
       setSearchError(null);
@@ -35,7 +34,13 @@ export const AgentNativeReadsCard = () => {
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery]);
+  }, []);
+
+  // Perform search on submit
+  const performSearch = useCallback(async () => {
+    const query = searchQuery.trim();
+    await executeSearch(query);
+  }, [searchQuery, executeSearch]);
 
   // Handle Enter key
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -47,18 +52,7 @@ export const AgentNativeReadsCard = () => {
   // Handle example query click
   const handleExampleClick = (query: string) => {
     setSearchQuery(query);
-    // Trigger search immediately
-    setIsSearching(true);
-    setSearchError(null);
-    setSubmittedQuery(query);
-    searchApi.searchOrders(query, 3)
-      .then((response) => setSearchResult(response.data))
-      .catch((error) => {
-        console.error("Search failed:", error);
-        setSearchError("Search unavailable. Ensure OpenSearch is running.");
-        setSearchResult(null);
-      })
-      .finally(() => setIsSearching(false));
+    executeSearch(query);
   };
 
   // Build the OpenSearch query for display
