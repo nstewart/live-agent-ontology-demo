@@ -3,7 +3,7 @@
 
 -- Orders Flattened View
 -- Provides a denormalized view of orders with key operational context
--- order_total_amount is DERIVED from line items (not stored) to match Materialize behavior
+-- order_total_amount is COMPUTED from line items (not stored triple) to match Materialize
 CREATE OR REPLACE VIEW orders_flat AS
 WITH order_line_amounts AS (
     -- Calculate line_amount from quantity * unit_price (derived, not stored)
@@ -26,7 +26,16 @@ order_totals AS (
 order_subjects AS (
     SELECT DISTINCT subject_id
     FROM triples
-    WHERE subject_id LIKE 'order:%'
+    WHERE subject_id LIKE 'orderline:%'
+    GROUP BY subject_id
+),
+order_totals AS (
+    -- Aggregate line amounts per order BEFORE joining with order triples
+    SELECT
+        order_id,
+        COALESCE(SUM(line_amount), 0.00)::DECIMAL(10,2) AS computed_total
+    FROM order_line_amounts
+    GROUP BY order_id
 )
 SELECT
     os.subject_id AS order_id,
@@ -161,6 +170,7 @@ SELECT
     MAX(CASE WHEN t.predicate = 'category' THEN t.object_value END) AS category,
     MAX(CASE WHEN t.predicate = 'unit_price' THEN t.object_value END)::DECIMAL(10,2) AS unit_price,
     MAX(CASE WHEN t.predicate = 'perishable' THEN t.object_value END)::BOOLEAN AS perishable,
+    MAX(CASE WHEN t.predicate = 'unit_weight_grams' THEN t.object_value END)::INT AS unit_weight_grams,
     MAX(t.updated_at) AS effective_updated_at
 FROM product_subjects ps
 LEFT JOIN triples t ON t.subject_id = ps.subject_id
