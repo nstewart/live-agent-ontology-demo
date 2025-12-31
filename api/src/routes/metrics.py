@@ -30,15 +30,15 @@ class StoreTimeseriesPoint(BaseModel):
 
 
 class SystemTimeseriesPoint(BaseModel):
-    """A single timeseries data point for system-wide metrics."""
+    """A single point-in-time snapshot of system-wide order state."""
     id: str
-    window_end: int  # epoch milliseconds
-    total_queue_depth: int
-    total_in_progress: int
-    total_orders: int
-    avg_wait_minutes: Optional[float]
-    max_wait_minutes: Optional[float]
-    total_orders_picked_up: int
+    window_end: int  # epoch milliseconds (snapshot time)
+    total_queue_depth: int  # orders waiting (CREATED status)
+    total_in_progress: int  # orders being worked (PICKING/OUT_FOR_DELIVERY)
+    total_orders: int  # queue_depth + in_progress
+    avg_wait_minutes: Optional[float]  # not available in snapshot view
+    max_wait_minutes: Optional[float]  # not available in snapshot view
+    total_orders_picked_up: int  # throughput: orders delivered this minute
 
 
 class TimeseriesResponse(BaseModel):
@@ -116,19 +116,20 @@ async def get_timeseries(
         for row in store_rows
     ]
 
-    # Query system-level timeseries
+    # Query system-level point-in-time snapshots
+    # This view shows actual queue depth and in-progress counts at each minute
     system_query = text("""
         SELECT
             id,
-            window_end,
-            COALESCE(total_queue_depth, 0) as total_queue_depth,
-            COALESCE(total_in_progress, 0) as total_in_progress,
-            COALESCE(total_orders, 0) as total_orders,
-            avg_wait_minutes,
-            max_wait_minutes,
-            COALESCE(total_orders_picked_up, 0) as total_orders_picked_up
-        FROM system_metrics_timeseries_mv
-        ORDER BY window_end DESC
+            snapshot_time as window_end,
+            COALESCE(queue_depth, 0) as total_queue_depth,
+            COALESCE(in_progress, 0) as total_in_progress,
+            COALESCE(queue_depth, 0) + COALESCE(in_progress, 0) as total_orders,
+            NULL::numeric as avg_wait_minutes,
+            NULL::numeric as max_wait_minutes,
+            COALESCE(delivered_this_minute, 0) as total_orders_picked_up
+        FROM system_state_snapshots_mv
+        ORDER BY snapshot_time DESC
         LIMIT :limit
     """)
 
