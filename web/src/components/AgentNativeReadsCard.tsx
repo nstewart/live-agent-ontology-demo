@@ -104,9 +104,10 @@ export const AgentNativeReadsCard = () => {
           {/* Explainer text */}
           <div className="mb-4 text-sm text-gray-600 leading-relaxed space-y-2">
             <p>
-              Traditional databases require agents to know exact IDs. Search indexes let agents
-              ask questions like "orders from the downtown store" and get answers instantly.
-              Materialize keeps the index perfectly fresh&mdash;no stale data, no batch refresh lag.
+              Traditional databases require agents to know exact IDs or query based on indexes
+              at scale. Search indexes let agents ask questions like "orders from the downtown
+              store" and get answers instantly. Materialize keeps the index perfectly
+              fresh&mdash;no stale data, no batch refresh lag.
             </p>
             <p className="text-xs text-gray-500">
               In production, some customers add a vector index for improved semantic search

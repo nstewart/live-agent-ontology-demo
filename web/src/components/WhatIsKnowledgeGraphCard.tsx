@@ -18,7 +18,7 @@ export const WhatIsKnowledgeGraphCard = () => {
             <ChevronRight className="h-5 w-5 text-gray-500" />
           )}
           <div className="text-left">
-            <h3 className="text-lg font-semibold text-gray-900">What is a Knowledge Graph?</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Leveraging Knowledge Graphs</h3>
             <p className="text-xs text-gray-500">
               The schema that gives structure and meaning to triples
             </p>
