@@ -1253,18 +1253,22 @@ psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS i
 #   - compatible_pair: base pairwise compatibility check
 #   - bundle_membership: assigns orders to bundles, referencing itself for clique validation
 #   - Fixed-point iteration until bundle assignments stabilize
+#
+# NOTE: This feature is opt-in due to high CPU usage (~460s elapsed time).
+# Enable with ENABLE_DELIVERY_BUNDLING=true
 # =============================================================================
 
-echo "Creating delivery bundling views with mutual recursion..."
+if [ "$ENABLE_DELIVERY_BUNDLING" = "true" ]; then
+    echo "Creating delivery bundling views with mutual recursion (ENABLE_DELIVERY_BUNDLING=true)..."
 
-# Helper view: Order weights (total weight per order)
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
-CREATE VIEW IF NOT EXISTS order_weights AS
-SELECT
-    ol.order_id,
-    SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0))::INT AS total_weight_grams
-FROM order_lines_flat_mv ol
-GROUP BY ol.order_id;"
+    # Helper view: Order weights (total weight per order)
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+    CREATE VIEW IF NOT EXISTS order_weights AS
+    SELECT
+        ol.order_id,
+        SUM(ol.quantity * COALESCE(ol.unit_weight_grams, 0))::INT AS total_weight_grams
+    FROM order_lines_flat_mv ol
+    GROUP BY ol.order_id;"
 
 # Main mutually recursive view for delivery bundling
 # Produces one row per bundle with JSON array of orders
@@ -1450,8 +1454,51 @@ WHERE o1.order_status = 'CREATED'
   );"
 
 # Create a unique key for compatible_pairs_mv
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS compatible_pairs_pk_idx IN CLUSTER serving ON compatible_pairs_mv (order_a, order_b);"
-psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS compatible_pairs_store_idx IN CLUSTER serving ON compatible_pairs_mv (store_id);"
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS compatible_pairs_pk_idx IN CLUSTER serving ON compatible_pairs_mv (order_a, order_b);"
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS compatible_pairs_store_idx IN CLUSTER serving ON compatible_pairs_mv (store_id);"
+
+else
+    echo "Skipping delivery bundling views (ENABLE_DELIVERY_BUNDLING != true)"
+    echo "To enable, run: ENABLE_DELIVERY_BUNDLING=true make up-agent-bundling"
+
+    # Drop existing bundling views if they exist (from a previous bundling-enabled run)
+    # This ensures we replace full views with stub views
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP MATERIALIZED VIEW IF EXISTS compatible_pairs_mv CASCADE;" 2>/dev/null || true
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP MATERIALIZED VIEW IF EXISTS delivery_bundles_mv CASCADE;" 2>/dev/null || true
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "DROP VIEW IF EXISTS order_weights CASCADE;" 2>/dev/null || true
+
+    # Create empty stub views with same schema so materialize-zero doesn't crash
+    # These views return no rows but have the expected columns
+
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+    CREATE MATERIALIZED VIEW IF NOT EXISTS delivery_bundles_mv IN CLUSTER compute AS
+    SELECT
+        ''::text AS bundle_id,
+        ''::text AS store_id,
+        ''::text AS store_name,
+        '[]'::jsonb AS orders,
+        0::bigint AS bundle_size
+    WHERE FALSE;"
+
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
+    CREATE MATERIALIZED VIEW IF NOT EXISTS compatible_pairs_mv IN CLUSTER compute AS
+    SELECT
+        ''::text AS pair_id,
+        ''::text AS order_a,
+        ''::text AS order_b,
+        ''::text AS store_id,
+        ''::text AS store_name,
+        ''::text AS overlap_start,
+        ''::text AS overlap_end,
+        0::int AS order_a_weight_grams,
+        0::int AS order_b_weight_grams,
+        0::int AS combined_weight_grams
+    WHERE FALSE;"
+
+    # Create indexes on stub views
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS delivery_bundles_id_idx IN CLUSTER serving ON delivery_bundles_mv (bundle_id);"
+    psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS compatible_pairs_pk_idx IN CLUSTER serving ON compatible_pairs_mv (order_a, order_b);"
+fi
 
 echo "Verifying three-tier setup..."
 echo ""
