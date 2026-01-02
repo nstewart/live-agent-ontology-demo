@@ -1469,31 +1469,35 @@ else
 
     # Create empty stub views with same schema so materialize-zero doesn't crash
     # These views return no rows but have the expected columns
+    # IMPORTANT: Must reference an upstream table (orders_flat_mv) so the frontier advances!
+    # Without an upstream dependency, the view's frontier stays stuck and blocks Zero sync.
 
     psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
     CREATE MATERIALIZED VIEW IF NOT EXISTS delivery_bundles_mv IN CLUSTER compute AS
     SELECT
-        ''::text AS bundle_id,
-        ''::text AS store_id,
+        order_id AS bundle_id,
+        store_id AS store_id,
         ''::text AS store_name,
         '[]'::jsonb AS orders,
         0::bigint AS bundle_size
-    WHERE FALSE;"
+    FROM orders_flat_mv
+    WHERE order_id = '__stub_never_matches__';"
 
     psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "
     CREATE MATERIALIZED VIEW IF NOT EXISTS compatible_pairs_mv IN CLUSTER compute AS
     SELECT
-        ''::text AS pair_id,
-        ''::text AS order_a,
-        ''::text AS order_b,
-        ''::text AS store_id,
+        order_id AS pair_id,
+        order_id AS order_a,
+        order_id AS order_b,
+        store_id AS store_id,
         ''::text AS store_name,
         ''::text AS overlap_start,
         ''::text AS overlap_end,
         0::int AS order_a_weight_grams,
         0::int AS order_b_weight_grams,
         0::int AS combined_weight_grams
-    WHERE FALSE;"
+    FROM orders_flat_mv
+    WHERE order_id = '__stub_never_matches__';"
 
     # Create indexes on stub views
     psql -h "$MZ_HOST" -p "$MZ_PORT" -U materialize -c "CREATE INDEX IF NOT EXISTS delivery_bundles_id_idx IN CLUSTER serving ON delivery_bundles_mv (bundle_id);"
