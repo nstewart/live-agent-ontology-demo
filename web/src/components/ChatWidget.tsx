@@ -157,12 +157,12 @@ export default function ChatWidget() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentThinking]);
 
-  // Floating bubble when closed
+  // Floating bubble when closed - positioned above the PropagationWidget (h-10 = 40px)
   if (!isOpen) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 h-14 w-14 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all z-50 hover:scale-105"
+        className="fixed bottom-16 right-6 h-14 w-14 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all z-50 hover:scale-105"
         title="Open Operations Assistant"
       >
         <MessageCircle className="h-6 w-6" />
