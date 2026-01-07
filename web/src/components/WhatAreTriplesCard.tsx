@@ -92,9 +92,9 @@ export const WhatAreTriplesCard = ({
             <ChevronRight className="h-5 w-5 text-gray-500" />
           )}
           <div className="text-left">
-            <h3 className="text-lg font-semibold text-gray-900">The Triple Data Structure</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Agent-Scale Writes</h3>
             <p className="text-xs text-gray-500">
-              The atomic unit of knowledge for agent-scale writes
+              Using "triples" as the atomic unit of knowledge recorded by agents
             </p>
           </div>
         </div>

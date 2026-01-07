@@ -14,7 +14,6 @@ import {
   Play,
   Square,
   Wifi,
-  WifiOff,
   BarChart3,
   Database,
   Zap,
@@ -848,65 +847,71 @@ export default function QueryStatisticsPage() {
   return (
     <div className="p-6">
       {/* Header - Sticky */}
-      <div className="flex justify-between items-center mb-6 sticky top-0 z-10 bg-gray-50 -mx-6 px-6 py-4 -mt-6">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Agent Reference Architecture</h1>
-            {isPolling ? (
-              <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-full">
-                <Wifi className="h-3 w-3" />
-                Polling
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 rounded-full">
-                <WifiOff className="h-3 w-3" />
-                Stopped
-              </span>
-            )}
-            {isPolling && (
-              <span className="text-xs text-gray-500">
-                Last update: {new Date(lastUpdateTime).toLocaleTimeString()}
-              </span>
-            )}
+      <div className="mb-6 sticky top-0 z-10 bg-gray-50 -mx-6 px-6 py-4 -mt-6">
+        {/* Top row: Title and Controls */}
+        <div className="flex justify-between items-start">
+          <h1 className="text-2xl font-bold text-gray-900">Agent Reference Architecture</h1>
+
+          {/* Controls group */}
+          <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-3 py-2 shadow-sm">
+            {/* Polling control */}
+            <div className="flex items-center gap-2">
+              {!isPolling ? (
+                <button
+                  onClick={handleStartPolling}
+                  disabled={!selectedOrderId}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  Start
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={handleStopPolling}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium"
+                  >
+                    <Square className="h-3.5 w-3.5" />
+                    Stop
+                  </button>
+                  <span className="flex items-center gap-1 text-xs text-green-600">
+                    <Wifi className="h-3 w-3" />
+                    Live
+                  </span>
+                </>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-gray-200" />
+
+            {/* View mode */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">View</label>
+              <select
+                value={viewMode}
+                onChange={(e) => setViewMode(e.target.value as ViewMode)}
+                className="px-2 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white"
+              >
+                <option value="query-offload">Query Offload</option>
+                <option value="batch">Batch Computation</option>
+                <option value="materialize">Materialize</option>
+              </select>
+            </div>
           </div>
-          <p className="text-gray-600">
-            Materialize creates a foundational data layer for AI agents by creating a live semantic representation of a business that can handle agent-scale writes and reads.
+        </div>
+
+        {/* Description row */}
+        <p className="text-gray-600 text-sm max-w-3xl">
+          Materialize creates a foundational data layer for AI agents by creating a live semantic representation of a business that can handle agent-scale writes and reads from siloed operational databases.
+        </p>
+
+        {/* Polling status indicator */}
+        {isPolling && (
+          <p className="text-xs text-gray-400 mt-1">
+            Last update: {new Date(lastUpdateTime).toLocaleTimeString()}
           </p>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
-            {!isPolling ? (
-              <button
-                onClick={handleStartPolling}
-                disabled={!selectedOrderId}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
-              >
-                <Play className="h-4 w-4" />
-                Start Polling
-              </button>
-            ) : (
-              <button
-                onClick={handleStopPolling}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
-              >
-                <Square className="h-4 w-4" />
-                Stop
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-600">View Mode:</label>
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value as ViewMode)}
-              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white"
-            >
-              <option value="query-offload">Query Offload</option>
-              <option value="batch">Batch Computation</option>
-              <option value="materialize">Materialize</option>
-            </select>
-          </div>
-        </div>
+        )}
       </div>
 
       {error && (
@@ -944,7 +949,7 @@ export default function QueryStatisticsPage() {
             <div className="text-left">
               <h3 className="text-lg font-semibold text-gray-900">Live Data Products</h3>
               <p className="text-xs text-gray-500">
-                Transform writes into live context made available at agent-scale
+                Integrate writes from siloed operational systems and apply complex business logic to transform them into live context that can be delivered at agent scale
               </p>
             </div>
           </div>
