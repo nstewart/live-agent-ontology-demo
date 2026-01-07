@@ -383,18 +383,19 @@ const OrderCard = ({ title, subtitle, icon, iconColor, bgColor, order, isLoading
                 {isExpanded && (
                   <div className="mt-2 space-y-1 max-h-[250px] overflow-y-auto">
                     {/* Header row */}
-                    <div className="text-[10px] text-gray-500 px-2 py-1 border-b grid grid-cols-[1fr_50px_50px_50px] gap-1">
+                    <div className="text-[10px] text-gray-500 px-2 py-1 border-b grid grid-cols-[1fr_40px_40px_40px_55px] gap-1">
                       <span>Product</span>
                       <span className="text-right" title="Price when order was placed">Order</span>
                       <span className="text-right" title="Product catalog price">Base</span>
                       <span className="text-right" title="Current dynamic price">Live</span>
+                      <span className="text-right" title="Quantity × Order Price">Subtotal</span>
                     </div>
                     {order.line_items.map((item: OrderLineItem) => (
                       <div
                         key={item.line_id}
                         className="text-xs py-1.5 px-2 bg-gray-50 rounded"
                       >
-                        <div className="grid grid-cols-[1fr_50px_50px_50px] gap-1 items-center">
+                        <div className="grid grid-cols-[1fr_40px_40px_40px_55px] gap-1 items-center">
                           <div className="min-w-0">
                             <span className="truncate block font-medium">
                               {item.product_name || item.product_id}
@@ -411,6 +412,9 @@ const OrderCard = ({ title, subtitle, icon, iconColor, bgColor, order, isLoading
                           </span>
                           <span className="text-right font-mono text-blue-600">
                             ${item.live_price?.toFixed(2) ?? '-'}
+                          </span>
+                          <span className="text-right font-mono font-medium">
+                            ${item.line_amount?.toFixed(2) ?? '-'}
                           </span>
                         </div>
                         <div className="text-[10px] text-gray-400 font-mono mt-0.5">
