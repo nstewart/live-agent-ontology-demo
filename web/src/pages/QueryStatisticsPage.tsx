@@ -873,55 +873,13 @@ export default function QueryStatisticsPage() {
             Materialize creates a foundational data layer for AI agents by creating a live semantic representation of a business that can handle agent-scale writes and reads.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-600">View Mode:</label>
-          <select
-            value={viewMode}
-            onChange={(e) => setViewMode(e.target.value as ViewMode)}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white"
-          >
-            <option value="query-offload">Query Offload</option>
-            <option value="batch">Batch Computation</option>
-            <option value="materialize">Materialize</option>
-          </select>
-        </div>
-      </div>
-
-      {error && (
-        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-lg">{error}</div>
-      )}
-
-      {/* Order Selector */}
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              <ShoppingCart className="h-4 w-4 inline mr-1" />
-              Select Order
-            </label>
-            <select
-              value={selectedOrderId}
-              onChange={(e) => {
-                setSelectedOrderId(e.target.value);
-                setTripleSubject(e.target.value);
-                userSetSubjectRef.current = false; // Reset flag when changing orders
-              }}
-              disabled={isPolling}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-            >
-              {orders.map((order) => (
-                <option key={order.order_id} value={order.order_id}>
-                  {order.order_number || order.order_id} - {order.order_status} - {order.customer_name || "Unknown"} @ {order.store_name || "Unknown"}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2 pt-6">
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
             {!isPolling ? (
               <button
                 onClick={handleStartPolling}
                 disabled={!selectedOrderId}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm"
               >
                 <Play className="h-4 w-4" />
                 Start Polling
@@ -929,15 +887,31 @@ export default function QueryStatisticsPage() {
             ) : (
               <button
                 onClick={handleStopPolling}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
               >
                 <Square className="h-4 w-4" />
                 Stop
               </button>
             )}
           </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">View Mode:</label>
+            <select
+              value={viewMode}
+              onChange={(e) => setViewMode(e.target.value as ViewMode)}
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white"
+            >
+              <option value="query-offload">Query Offload</option>
+              <option value="batch">Batch Computation</option>
+              <option value="materialize">Materialize</option>
+            </select>
+          </div>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 text-red-700 rounded-lg">{error}</div>
+      )}
 
       {/* What are Triples? Card */}
       <WhatAreTriplesCard
@@ -945,6 +919,13 @@ export default function QueryStatisticsPage() {
         orderNumber={zeroOrder?.order_number ?? null}
         lineItemIds={zeroOrder?.line_items?.map((item) => item.line_id) ?? []}
         onTripleClick={handleTripleClick}
+        orders={orders}
+        onOrderChange={(orderId) => {
+          setSelectedOrderId(orderId);
+          setTripleSubject(orderId);
+          userSetSubjectRef.current = false;
+        }}
+        isPolling={isPolling}
         refreshTrigger={triplesRefreshTrigger}
       />
 
@@ -963,7 +944,7 @@ export default function QueryStatisticsPage() {
             <div className="text-left">
               <h3 className="text-lg font-semibold text-gray-900">Live Data Products</h3>
               <p className="text-xs text-gray-500">
-                View lineage from source to materialized views powering the Orders page
+                Transform writes into live context made available at agent-scale
               </p>
             </div>
           </div>
