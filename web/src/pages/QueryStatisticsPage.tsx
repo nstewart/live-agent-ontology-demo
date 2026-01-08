@@ -1565,8 +1565,9 @@ export default function QueryStatisticsPage() {
                       <span className="text-sm font-medium text-gray-200">API Response</span>
                     </div>
                     <div className="mt-2 font-mono text-xs text-gray-400 space-y-0.5">
-                      <div><span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv</div>
-                      <div><span className="text-purple-400">LEFT JOIN</span> dynamic_pricing_mv</div>
+                      <div><span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv o</div>
+                      <div><span className="text-purple-400">LEFT JOIN</span> inventory_items_with_dynamic_pricing_mv p</div>
+                      <div className="text-gray-500 pl-4"><span className="text-purple-400">ON</span> p.product_id = o.product_id <span className="text-purple-400">AND</span> p.store_id = o.store_id</div>
                     </div>
                   </div>
                   {/* JSON Content */}
