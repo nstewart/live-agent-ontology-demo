@@ -244,7 +244,6 @@ async def update_order_fields(
     order_id: str,
     data: OrderFieldsUpdate,
     service: OrderLineService = Depends(get_order_line_service),
-    session: AsyncSession = Depends(get_pg_write_session),
 ):
     """
     Smart-patch order fields and line items.
@@ -272,37 +271,9 @@ async def update_order_fields(
     Contrast with `/atomic` which always deletes and recreates all line items.
     """
     try:
-        # Query order's current store_id and product_ids for propagation focus
-        # This ensures the propagation widget prioritizes events related to this order
-        order_data = await session.execute(
-            text("""
-                SELECT
-                    MAX(CASE WHEN predicate = 'order_store' THEN object_value END) AS store_id
-                FROM triples
-                WHERE subject_id = :order_id
-            """),
-            {"order_id": order_id}
-        )
-        order_row = order_data.fetchone()
-        store_id = order_row.store_id if order_row else None
-
-        # Get product_ids from order lines
-        line_data = await session.execute(
-            text("""
-                SELECT DISTINCT t2.object_value AS product_id
-                FROM triples t1
-                JOIN triples t2 ON t2.subject_id = t1.subject_id AND t2.predicate = 'line_product'
-                WHERE t1.predicate = 'line_of_order' AND t1.object_value = :order_id
-            """),
-            {"order_id": order_id}
-        )
-        product_ids = [row.product_id for row in line_data.fetchall()]
-
-        # Set propagation focus before making changes
-        if store_id and product_ids:
-            await set_propagation_focus(order_id, store_id, product_ids)
-
-        await service.update_order_fields(
+        # Update order and get the final state (store_id, product_ids) from within the transaction
+        # This ensures the propagation focus data matches what was actually written
+        final_store_id, final_product_ids = await service.update_order_fields(
             order_id=order_id,
             order_status=data.order_status,
             customer_id=data.customer_id,
@@ -311,6 +282,10 @@ async def update_order_fields(
             delivery_window_end=data.delivery_window_end,
             line_items=data.line_items,
         )
+
+        # Set propagation focus after changes (using data from within the transaction)
+        if final_store_id and final_product_ids:
+            await set_propagation_focus(order_id, final_store_id, final_product_ids)
         return {"success": True, "order_id": order_id}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
