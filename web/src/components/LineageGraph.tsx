@@ -188,28 +188,6 @@ export function LineageGraph({ selectedNodeId, onNodeClick }: LineageGraphProps)
 
   return (
     <div className="w-full">
-      {/* Legend */}
-      <div className="flex gap-6 mb-4 text-sm">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded" style={{ background: nodeColors.source.bg }} />
-          <span className="text-gray-600">Source (CDC)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded" style={{ background: nodeColors.view.bg }} />
-          <span className="text-gray-600">View</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded" style={{ background: nodeColors.mv.bg }} />
-          <span className="text-gray-600">Materialized View</span>
-        </div>
-        {selectedNodeId && (
-          <div className="flex items-center gap-2 ml-auto">
-            <div className="w-4 h-4 rounded border-2 border-yellow-400" style={{ background: 'transparent' }} />
-            <span className="text-gray-600">Selected</span>
-          </div>
-        )}
-      </div>
-
       {/* Graph */}
       <div className="h-[350px] w-full border border-gray-200 rounded-lg bg-gray-50">
         <ReactFlow
@@ -229,6 +207,28 @@ export function LineageGraph({ selectedNodeId, onNodeClick }: LineageGraphProps)
         >
           <Background color="#e5e7eb" gap={16} />
         </ReactFlow>
+      </div>
+
+      {/* Legend */}
+      <div className="flex gap-6 mt-3 text-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ background: nodeColors.source.bg }} />
+          <span className="text-gray-600">Source (CDC)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ background: nodeColors.view.bg }} />
+          <span className="text-gray-600">View</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded" style={{ background: nodeColors.mv.bg }} />
+          <span className="text-gray-600">Materialized View</span>
+        </div>
+        {selectedNodeId && (
+          <div className="flex items-center gap-2 ml-auto">
+            <div className="w-4 h-4 rounded border-2 border-yellow-400" style={{ background: 'transparent' }} />
+            <span className="text-gray-600">Selected</span>
+          </div>
+        )}
       </div>
 
       {/* Description */}

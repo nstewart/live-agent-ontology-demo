@@ -1549,6 +1549,7 @@ export default function QueryStatisticsPage() {
             <div className="flex gap-6">
               {/* Left: Lineage Graph */}
               <div className="flex-[3]">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Context maintained proactively</h4>
                 <LineageGraph
                   selectedNodeId={selectedNodeId}
                   onNodeClick={handleNodeClick}
@@ -1557,6 +1558,7 @@ export default function QueryStatisticsPage() {
 
               {/* Right: JSON API Response */}
               <div className="flex-[2] flex flex-col">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">Context obtained reactively</h4>
                 <div className="bg-gray-900 rounded-lg overflow-hidden flex flex-col h-[430px]">
                   {/* Header */}
                   <div className="px-4 py-3 bg-gray-800 border-b border-gray-700 flex-shrink-0">
