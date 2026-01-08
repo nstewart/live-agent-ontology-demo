@@ -1545,7 +1545,7 @@ export default function QueryStatisticsPage() {
               </div>
             </div>
 
-            {/* Lineage Graph and API Response */}
+            {/* Lineage Graph and API Response - 2 column layout */}
             <div className="flex gap-6">
               {/* Left: Lineage Graph */}
               <div className="flex-[3]">
@@ -1554,6 +1554,7 @@ export default function QueryStatisticsPage() {
                   onNodeClick={handleNodeClick}
                 />
               </div>
+
               {/* Right: JSON API Response */}
               <div className="flex-[2] flex flex-col">
                 <div className="bg-gray-900 rounded-lg overflow-hidden flex flex-col h-[430px]">
@@ -1562,13 +1563,10 @@ export default function QueryStatisticsPage() {
                     <div className="flex items-center gap-2">
                       <Database className="h-4 w-4 text-blue-400" />
                       <span className="text-sm font-medium text-gray-200">API Response</span>
-                      <span className="text-xs text-gray-500">(single query with JOIN)</span>
                     </div>
                     <div className="mt-2 font-mono text-xs text-gray-400 space-y-0.5">
-                      <div><span className="text-purple-400">WITH</span> order_data <span className="text-purple-400">AS</span> (<span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv ...),</div>
-                      <div className="pl-2">line_items_expanded <span className="text-purple-400">AS</span> (<span className="text-purple-400">LATERAL</span> jsonb_array_elements ...)</div>
-                      <div><span className="text-purple-400">SELECT</span> ... <span className="text-purple-400">FROM</span> line_items_expanded</div>
-                      <div className="pl-2"><span className="text-purple-400">LEFT JOIN</span> dynamic_pricing_mv <span className="text-purple-400">ON</span> product_id, store_id</div>
+                      <div><span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv</div>
+                      <div><span className="text-purple-400">LEFT JOIN</span> dynamic_pricing_mv</div>
                     </div>
                   </div>
                   {/* JSON Content */}
@@ -1583,51 +1581,59 @@ export default function QueryStatisticsPage() {
               </div>
             </div>
 
-            {/* SQL Definition Viewer - shown when a node is selected */}
+            {/* View Definition Modal */}
             {selectedNodeId && (
-              <div className="mt-6 bg-gray-900 rounded-lg overflow-hidden">
-                {/* Header */}
-                <div className="px-4 py-3 bg-gray-800 border-b border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Code className="h-4 w-4 text-yellow-400" />
-                      <span className="text-sm font-medium text-gray-200">View Definition</span>
-                      <span className="text-xs text-gray-500">
-                        (click a node in the graph to view its SQL)
-                      </span>
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                {/* Backdrop */}
+                <div
+                  className="absolute inset-0 bg-black/50"
+                  onClick={() => {
+                    setSelectedNodeId(null);
+                    setViewDefinition(null);
+                  }}
+                />
+                {/* Modal */}
+                <div className="relative bg-gray-900 rounded-lg overflow-hidden w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl">
+                  {/* Header */}
+                  <div className="px-4 py-3 bg-gray-800 border-b border-gray-700 flex-shrink-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Code className="h-4 w-4 text-yellow-400" />
+                        <span className="text-sm font-medium text-gray-200">View Definition</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setSelectedNodeId(null);
+                          setViewDefinition(null);
+                        }}
+                        className="text-gray-400 hover:text-gray-200 transition-colors"
+                        title="Close"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => {
-                        setSelectedNodeId(null);
-                        setViewDefinition(null);
-                      }}
-                      className="text-gray-400 hover:text-gray-200 transition-colors"
-                      title="Close"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-2 font-mono text-xs text-gray-400">
-                    <span className="text-purple-400">SHOW CREATE</span>{' '}
-                    <span className="text-blue-400">
-                      {viewDefinition?.object_type === 'materialized_view' ? 'MATERIALIZED VIEW' :
-                       viewDefinition?.object_type === 'source' ? 'SOURCE' :
-                       viewDefinition?.object_type === 'table' ? 'TABLE' : 'VIEW'}
-                    </span>{' '}
-                    <span className="text-green-400">{selectedNodeId}</span>
-                  </div>
-                </div>
-                {/* SQL Content */}
-                <div className="max-h-[300px] overflow-auto p-4">
-                  {viewDefLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-600 border-t-yellow-400"></div>
+                    <div className="mt-2 font-mono text-xs text-gray-400">
+                      <span className="text-purple-400">SHOW CREATE</span>{' '}
+                      <span className="text-blue-400">
+                        {viewDefinition?.object_type === 'materialized_view' ? 'MATERIALIZED VIEW' :
+                         viewDefinition?.object_type === 'source' ? 'SOURCE' :
+                         viewDefinition?.object_type === 'table' ? 'TABLE' : 'VIEW'}
+                      </span>{' '}
+                      <span className="text-green-400">{selectedNodeId}</span>
                     </div>
-                  ) : viewDefinition ? (
-                    <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap">{viewDefinition.sql}</pre>
-                  ) : (
-                    <pre className="text-xs font-mono text-gray-500">Failed to load view definition</pre>
-                  )}
+                  </div>
+                  {/* SQL Content */}
+                  <div className="flex-1 overflow-auto p-4">
+                    {viewDefLoading ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-600 border-t-yellow-400"></div>
+                      </div>
+                    ) : viewDefinition ? (
+                      <pre className="text-sm font-mono text-gray-300 whitespace-pre-wrap">{viewDefinition.sql}</pre>
+                    ) : (
+                      <pre className="text-xs font-mono text-gray-500">Failed to load view definition</pre>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
