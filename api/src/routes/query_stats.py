@@ -958,6 +958,92 @@ async def write_triple(data: TripleWrite):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/view-definition/{view_name}")
+async def get_view_definition(view_name: str):
+    """Get the SQL definition of a view or materialized view from Materialize.
+
+    This endpoint fetches the CREATE statement for the specified object,
+    allowing users to see the SQL that defines each node in the lineage graph.
+    """
+    # Whitelist of allowed view names to prevent SQL injection
+    allowed_views = {
+        "triples",
+        "customers_flat",
+        "stores_flat",
+        "products_flat",
+        "order_lines_base",
+        "delivery_tasks_flat",
+        "orders_flat_mv",
+        "order_lines_flat_mv",
+        "orders_with_lines_mv",
+        "inventory_items_with_dynamic_pricing",
+        "inventory_items_with_dynamic_pricing_mv",
+        "store_inventory_mv",
+    }
+
+    if view_name not in allowed_views:
+        raise HTTPException(
+            status_code=400,
+            detail=f"View '{view_name}' not found. Allowed views: {', '.join(sorted(allowed_views))}",
+        )
+
+    try:
+        async with get_mz_session() as session:
+            # Set cluster for consistent behavior
+            await session.execute(text("SET CLUSTER = serving"))
+
+            # First, query the catalog to find the object type
+            type_result = await session.execute(
+                text("""
+                    SELECT type FROM mz_catalog.mz_objects
+                    WHERE name = :view_name
+                    AND schema_id = (SELECT id FROM mz_catalog.mz_schemas WHERE name = 'public')
+                """),
+                {"view_name": view_name},
+            )
+            type_row = type_result.fetchone()
+
+            if not type_row:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Could not find object '{view_name}' in catalog",
+                )
+
+            obj_type = type_row[0]
+
+            # Map catalog type to SHOW CREATE syntax
+            type_mapping = {
+                "view": "VIEW",
+                "materialized-view": "MATERIALIZED VIEW",
+                "source": "SOURCE",
+                "table": "TABLE",
+            }
+            show_type = type_mapping.get(obj_type, "VIEW")
+
+            # Now get the CREATE statement
+            result = await session.execute(
+                text(f"SHOW CREATE {show_type} {view_name}")
+            )
+            row = result.fetchone()
+
+            if row:
+                return {
+                    "view_name": view_name,
+                    "object_type": obj_type.replace("-", "_"),
+                    "sql": row[1] if len(row) > 1 else str(row[0]),
+                }
+
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not find definition for '{view_name}'",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get view definition: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Startup/shutdown functions removed - heartbeat now starts with polling
 def start_heartbeat_generator():
     """No-op for backwards compatibility with main.py."""

@@ -25,6 +25,8 @@ import {
   Package,
   ChevronDown,
   ChevronRight,
+  Code,
+  X,
 } from "lucide-react";
 import { useZero, useQuery } from "@rocicorp/zero/react";
 import { Schema } from "../schema";
@@ -36,6 +38,7 @@ import {
   OrderDataResponse,
   OrderWithLinesData,
   OrderLineItem,
+  ViewDefinitionResponse,
 } from "../api/client";
 import { LineageGraph } from "../components/LineageGraph";
 import { WhatAreTriplesCard } from "../components/WhatAreTriplesCard";
@@ -528,6 +531,11 @@ export default function QueryStatisticsPage() {
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
   const [error, setError] = useState<string | null>(null);
 
+  // View definition state for SQL viewer
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [viewDefinition, setViewDefinition] = useState<ViewDefinitionResponse | null>(null);
+  const [viewDefLoading, setViewDefLoading] = useState(false);
+
   // Zero for real-time Materialize data
   const z = useZero<Schema>();
 
@@ -924,6 +932,30 @@ export default function QueryStatisticsPage() {
       setWriteStatus("Write failed");
     }
   };
+
+  // Handle lineage graph node click
+  const handleNodeClick = useCallback(async (nodeId: string) => {
+    // Toggle selection if clicking the same node
+    if (nodeId === selectedNodeId) {
+      setSelectedNodeId(null);
+      setViewDefinition(null);
+      return;
+    }
+
+    setSelectedNodeId(nodeId);
+    setViewDefLoading(true);
+    setViewDefinition(null);
+
+    try {
+      const response = await queryStatsApi.getViewDefinition(nodeId);
+      setViewDefinition(response.data);
+    } catch (err) {
+      console.error("Failed to fetch view definition:", err);
+      setViewDefinition(null);
+    } finally {
+      setViewDefLoading(false);
+    }
+  }, [selectedNodeId]);
 
   // Format milliseconds for display
   const formatMs = (ms: number | undefined): string => {
@@ -1513,13 +1545,16 @@ export default function QueryStatisticsPage() {
               </div>
             </div>
 
-            {/* Lineage Graph and JSON API Response */}
+            {/* Lineage Graph and API Response */}
             <div className="flex gap-6">
               {/* Left: Lineage Graph */}
               <div className="flex-[3]">
-                <LineageGraph />
+                <LineageGraph
+                  selectedNodeId={selectedNodeId}
+                  onNodeClick={handleNodeClick}
+                />
               </div>
-              {/* Right: JSON API Response - height matches LineageGraph (legend + 350px graph + description) */}
+              {/* Right: JSON API Response */}
               <div className="flex-[2] flex flex-col">
                 <div className="bg-gray-900 rounded-lg overflow-hidden flex flex-col h-[430px]">
                   {/* Header */}
@@ -1527,11 +1562,17 @@ export default function QueryStatisticsPage() {
                     <div className="flex items-center gap-2">
                       <Database className="h-4 w-4 text-blue-400" />
                       <span className="text-sm font-medium text-gray-200">API Response</span>
+                      <span className="text-xs text-gray-500">(2 queries merged)</span>
                     </div>
-                    <div className="mt-2 font-mono text-xs text-gray-400">
-                      <span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv
-                      <br />
-                      <span className="text-purple-400">WHERE</span> order_id = <span className="text-green-400">'{selectedOrderId || '...'}'</span>
+                    <div className="mt-2 font-mono text-xs text-gray-400 space-y-1">
+                      <div>
+                        <span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv
+                        <span className="text-purple-400"> WHERE</span> order_id = <span className="text-green-400">'{selectedOrderId || '...'}'</span>
+                      </div>
+                      <div>
+                        <span className="text-purple-400">SELECT</span> product_id, live_price, ... <span className="text-purple-400">FROM</span> dynamic_pricing_mv
+                        <span className="text-purple-400"> WHERE</span> store_id = <span className="text-green-400">'...'</span>
+                      </div>
                     </div>
                   </div>
                   {/* JSON Content */}
@@ -1545,6 +1586,55 @@ export default function QueryStatisticsPage() {
                 </div>
               </div>
             </div>
+
+            {/* SQL Definition Viewer - shown when a node is selected */}
+            {selectedNodeId && (
+              <div className="mt-6 bg-gray-900 rounded-lg overflow-hidden">
+                {/* Header */}
+                <div className="px-4 py-3 bg-gray-800 border-b border-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Code className="h-4 w-4 text-yellow-400" />
+                      <span className="text-sm font-medium text-gray-200">View Definition</span>
+                      <span className="text-xs text-gray-500">
+                        (click a node in the graph to view its SQL)
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedNodeId(null);
+                        setViewDefinition(null);
+                      }}
+                      className="text-gray-400 hover:text-gray-200 transition-colors"
+                      title="Close"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-2 font-mono text-xs text-gray-400">
+                    <span className="text-purple-400">SHOW CREATE</span>{' '}
+                    <span className="text-blue-400">
+                      {viewDefinition?.object_type === 'materialized_view' ? 'MATERIALIZED VIEW' :
+                       viewDefinition?.object_type === 'source' ? 'SOURCE' :
+                       viewDefinition?.object_type === 'table' ? 'TABLE' : 'VIEW'}
+                    </span>{' '}
+                    <span className="text-green-400">{selectedNodeId}</span>
+                  </div>
+                </div>
+                {/* SQL Content */}
+                <div className="max-h-[300px] overflow-auto p-4">
+                  {viewDefLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-6 w-6 border-2 border-gray-600 border-t-yellow-400"></div>
+                    </div>
+                  ) : viewDefinition ? (
+                    <pre className="text-xs font-mono text-gray-300 whitespace-pre-wrap">{viewDefinition.sql}</pre>
+                  ) : (
+                    <pre className="text-xs font-mono text-gray-500">Failed to load view definition</pre>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
