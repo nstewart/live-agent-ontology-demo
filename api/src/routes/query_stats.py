@@ -610,15 +610,14 @@ async def measure_batch_query(order_id: str, store_id: Optional[str]):
 async def measure_mz_query(order_id: str, store_id: Optional[str]):
     """Query Materialize and record metrics.
 
-    This queries:
-    1. orders_with_lines_mv (order + line items)
-    2. inventory_items_with_dynamic_pricing_mv (live pricing)
+    Single SQL query that JOINs orders_with_lines_mv with dynamic_pricing_mv.
+    Both underlying MVs are INCREMENTALLY MAINTAINED by Materialize via CDC.
+    The final join happens at query time within a single transaction for consistency.
 
-    Both are INCREMENTALLY MAINTAINED by Materialize via CDC.
-    The query is FAST (reads pre-computed results from indexed views).
-    The data is FRESH (typically ~100ms lag via streaming replication).
-
-    This is the best of both worlds: fast queries AND fresh data.
+    Benefits:
+    - Single timestamp: All data from one consistent snapshot
+    - Fast: Both MVs are pre-computed, only the final join is on-demand
+    - Fresh: Typically ~100ms lag via streaming replication
     """
     start = time.perf_counter()
 
@@ -626,43 +625,89 @@ async def measure_mz_query(order_id: str, store_id: Optional[str]):
         async with get_mz_session() as session:
             await session.execute(text("SET CLUSTER = serving"))
 
-            # Query order with line items
-            order_result = await session.execute(
+            # Single query that joins order data with dynamic pricing
+            result = await session.execute(
                 text("""
-                    SELECT *
-                    FROM orders_with_lines_mv
-                    WHERE order_id = :order_id
+                    WITH order_data AS (
+                        SELECT * FROM orders_with_lines_mv WHERE order_id = :order_id
+                    ),
+                    line_items_expanded AS (
+                        SELECT
+                            o.order_id, o.order_number, o.order_status, o.store_id, o.customer_id,
+                            o.delivery_window_start, o.delivery_window_end, o.order_created_at, o.order_total_amount,
+                            o.customer_name, o.customer_email, o.customer_address,
+                            o.store_name, o.store_zone, o.store_address,
+                            o.assigned_courier_id, o.delivery_task_status, o.delivery_eta,
+                            o.line_item_count, o.computed_total, o.has_perishable_items, o.total_weight_kg,
+                            o.effective_updated_at,
+                            li.value as line_item,
+                            li.value->>'product_id' as li_product_id
+                        FROM order_data o,
+                        LATERAL jsonb_array_elements(o.line_items) AS li(value)
+                    ),
+                    enriched AS (
+                        SELECT
+                            lie.*,
+                            p.live_price,
+                            p.base_price,
+                            p.price_change,
+                            p.stock_level as current_stock
+                        FROM line_items_expanded lie
+                        LEFT JOIN inventory_items_with_dynamic_pricing_mv p
+                            ON p.product_id = lie.li_product_id
+                            AND p.store_id = lie.store_id
+                    )
+                    SELECT
+                        order_id, order_number, order_status, store_id, customer_id,
+                        delivery_window_start, delivery_window_end, order_created_at, order_total_amount,
+                        customer_name, customer_email, customer_address,
+                        store_name, store_zone, store_address,
+                        assigned_courier_id, delivery_task_status, delivery_eta,
+                        line_item_count, computed_total, has_perishable_items, total_weight_kg,
+                        effective_updated_at,
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'line_id', line_item->>'line_id',
+                                'product_id', line_item->>'product_id',
+                                'product_name', line_item->>'product_name',
+                                'category', line_item->>'category',
+                                'quantity', (line_item->>'quantity')::int,
+                                'unit_price', (line_item->>'unit_price')::numeric,
+                                'line_amount', (line_item->>'line_amount')::numeric,
+                                'line_sequence', (line_item->>'line_sequence')::int,
+                                'perishable_flag', (line_item->>'perishable_flag')::boolean,
+                                'live_price', live_price,
+                                'base_price', base_price,
+                                'price_change', price_change,
+                                'current_stock', current_stock
+                            )
+                        ) as line_items
+                    FROM enriched
+                    GROUP BY
+                        order_id, order_number, order_status, store_id, customer_id,
+                        delivery_window_start, delivery_window_end, order_created_at, order_total_amount,
+                        customer_name, customer_email, customer_address,
+                        store_name, store_zone, store_address,
+                        assigned_courier_id, delivery_task_status, delivery_eta,
+                        line_item_count, computed_total, has_perishable_items, total_weight_kg,
+                        effective_updated_at
                 """),
                 {"order_id": order_id},
             )
-            order_row = order_result.mappings().fetchone()
-
-            # Query live pricing from Materialize
-            pricing_rows = []
-            if store_id:
-                pricing_result = await session.execute(
-                    text("""
-                        SELECT product_id, live_price, base_price, price_change,
-                               stock_level, effective_updated_at
-                        FROM inventory_items_with_dynamic_pricing_mv
-                        WHERE store_id = :store_id
-                    """),
-                    {"store_id": store_id},
-                )
-                pricing_rows = [dict(row) for row in pricing_result.mappings().fetchall()]
+            order_row = result.mappings().fetchone()
 
         response_ms = (time.perf_counter() - start) * 1000
 
-        # Merge order with pricing
         if order_row:
-            merged = merge_order_with_pricing(dict(order_row), pricing_rows)
+            # Serialize the result (line_items is already enriched with pricing)
+            order_data = serialize_row(dict(order_row))
 
             # Update global state with lock protection
             async with get_state_lock():
-                latest_order_data["materialize"] = merged
+                latest_order_data["materialize"] = order_data
 
             # Reaction time = now - effective_updated_at (includes replication lag)
-            effective_updated = merged.get("effective_updated_at")
+            effective_updated = order_data.get("effective_updated_at")
             if effective_updated:
                 try:
                     updated_at = parse_effective_updated_at(effective_updated)

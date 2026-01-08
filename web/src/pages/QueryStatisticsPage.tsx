@@ -1562,17 +1562,13 @@ export default function QueryStatisticsPage() {
                     <div className="flex items-center gap-2">
                       <Database className="h-4 w-4 text-blue-400" />
                       <span className="text-sm font-medium text-gray-200">API Response</span>
-                      <span className="text-xs text-gray-500">(2 queries merged)</span>
+                      <span className="text-xs text-gray-500">(single query with JOIN)</span>
                     </div>
-                    <div className="mt-2 font-mono text-xs text-gray-400 space-y-1">
-                      <div>
-                        <span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv
-                        <span className="text-purple-400"> WHERE</span> order_id = <span className="text-green-400">'{selectedOrderId || '...'}'</span>
-                      </div>
-                      <div>
-                        <span className="text-purple-400">SELECT</span> product_id, live_price, ... <span className="text-purple-400">FROM</span> dynamic_pricing_mv
-                        <span className="text-purple-400"> WHERE</span> store_id = <span className="text-green-400">'...'</span>
-                      </div>
+                    <div className="mt-2 font-mono text-xs text-gray-400 space-y-0.5">
+                      <div><span className="text-purple-400">WITH</span> order_data <span className="text-purple-400">AS</span> (<span className="text-purple-400">SELECT</span> * <span className="text-purple-400">FROM</span> orders_with_lines_mv ...),</div>
+                      <div className="pl-2">line_items_expanded <span className="text-purple-400">AS</span> (<span className="text-purple-400">LATERAL</span> jsonb_array_elements ...)</div>
+                      <div><span className="text-purple-400">SELECT</span> ... <span className="text-purple-400">FROM</span> line_items_expanded</div>
+                      <div className="pl-2"><span className="text-purple-400">LEFT JOIN</span> dynamic_pricing_mv <span className="text-purple-400">ON</span> product_id, store_id</div>
                     </div>
                   </div>
                   {/* JSON Content */}
