@@ -855,14 +855,21 @@ export default function QueryStatisticsPage() {
     }
   };
 
-  // Cleanup on unmount
+  // Cleanup on unmount - stop both local interval and backend polling
   useEffect(() => {
     return () => {
       if (metricsIntervalRef.current) {
         clearInterval(metricsIntervalRef.current);
+        metricsIntervalRef.current = null;
       }
+      // Stop backend polling when navigating away
+      queryStatsApi.stopPolling().catch(() => {
+        // Ignore errors on unmount
+      });
+      // Clear propagation state
+      clearWrites();
     };
-  }, []);
+  }, [clearWrites]);
 
   // Handle triple row click - pre-populate the form
   const handleTripleClick = useCallback((subject: string, predicate: string, value: string) => {
