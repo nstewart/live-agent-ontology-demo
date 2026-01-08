@@ -479,6 +479,7 @@ async def measure_pg_view_query(order_id: str, store_id: Optional[str]):
                                 'price_change', price_change,
                                 'current_stock', current_stock
                             )
+                            ORDER BY (line_item->>'line_sequence')::int
                         ) as line_items
                     FROM enriched
                     GROUP BY
@@ -602,6 +603,7 @@ async def measure_batch_query(order_id: str, store_id: Optional[str]):
                                 'price_change', price_change,
                                 'current_stock', current_stock
                             )
+                            ORDER BY (line_item->>'line_sequence')::int
                         ) as line_items
                     FROM enriched
                     GROUP BY
@@ -726,6 +728,7 @@ async def measure_mz_query(order_id: str, store_id: Optional[str]):
                                 'price_change', price_change,
                                 'current_stock', current_stock
                             )
+                            ORDER BY (line_item->>'line_sequence')::int
                         ) as line_items
                     FROM enriched
                     GROUP BY
