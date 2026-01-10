@@ -422,10 +422,10 @@ make load-gen-standard
 **Solution**:
 ```bash
 # Verify FreshMart is running
-docker-compose ps
+docker compose ps
 
 # Check API logs
-docker-compose logs api
+docker compose logs api
 
 # Restart services
 make down && make up
@@ -460,10 +460,10 @@ make down && make up
 python -m loadgen start --verbose
 
 # Check API logs
-docker-compose logs -f api
+docker compose logs -f api
 
 # Verify seed data exists
-docker-compose exec api python -m pytest tests/test_freshmart_api.py
+docker compose exec api python -m pytest tests/test_freshmart_api.py
 ```
 
 ### Orders Not Appearing in UI
@@ -478,13 +478,13 @@ docker-compose exec api python -m pytest tests/test_freshmart_api.py
 **Solutions**:
 ```bash
 # Check Materialize replication status
-docker-compose exec mz psql -U materialize -c "SHOW SOURCES"
+docker compose exec mz psql -U materialize -c "SHOW SOURCES"
 
 # Check zero-server logs
-docker-compose logs zero-server
+docker compose logs zero-server
 
 # Restart zero-server
-docker-compose restart zero-server
+docker compose restart zero-server
 ```
 
 ## Performance Expectations

@@ -309,10 +309,10 @@ class Settings(BaseSettings):
 ### Quick Validation
 ```bash
 # 1. Start services
-docker-compose up -d
+docker compose up -d
 
 # 2. Check SUBSCRIBE connection
-docker-compose logs -f search-sync | grep "SUBSCRIBE"
+docker compose logs -f search-sync | grep "SUBSCRIBE"
 # Should see: "Starting SUBSCRIBE for view: orders_search_source_mv"
 
 # 3. Create test order

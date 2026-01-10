@@ -77,11 +77,11 @@ OPENAI_API_KEY=sk-...
 # Option 1: Using make (recommended - handles everything automatically)
 make up-agent
 
-# Option 2: Using docker-compose directly
+# Option 2: Using docker compose directly
 docker network create freshmart-network  # if not already created
-docker-compose --profile agent up -d
+docker compose --profile agent up -d
 ./db/materialize/init.sh  # if not already initialized
-docker-compose exec agents python -m src.init_checkpointer  # initialize conversation memory
+docker compose exec agents python -m src.init_checkpointer  # initialize conversation memory
 ```
 
 **Note:** `make up-agent` automatically:
@@ -92,7 +92,7 @@ docker-compose exec agents python -m src.init_checkpointer  # initialize convers
 ### Check Configuration
 
 ```bash
-docker-compose exec agents python -m src.main check
+docker compose exec agents python -m src.main check
 ```
 
 ## Using the Agent
@@ -103,7 +103,7 @@ Start an interactive chat session with persistent conversation memory:
 
 ```bash
 # Start interactive chat (creates a unique session)
-docker-compose exec -it agents python -m src.main chat
+docker compose exec -it agents python -m src.main chat
 ```
 
 **Example Conversation:**
@@ -140,11 +140,11 @@ Run a single query without entering interactive mode:
 
 ```bash
 # One-time query (creates a temporary thread_id)
-docker-compose exec agents python -m src.main chat "Show all orders for customer Alex Thompson"
+docker compose exec agents python -m src.main chat "Show all orders for customer Alex Thompson"
 
 # Continue a conversation across multiple commands with --thread-id
-docker-compose exec agents python -m src.main chat --thread-id my-session "Find orders for Lisa"
-docker-compose exec agents python -m src.main chat --thread-id my-session "Show me her orders"
+docker compose exec agents python -m src.main chat --thread-id my-session "Find orders for Lisa"
+docker compose exec agents python -m src.main chat --thread-id my-session "Show me her orders"
 ```
 
 ### HTTP API
@@ -564,13 +564,13 @@ The agent includes safety measures:
 ### Enable Debug Logging
 
 ```bash
-LOG_LEVEL=DEBUG docker-compose --profile agent up agents
+LOG_LEVEL=DEBUG docker compose --profile agent up agents
 ```
 
 ### Check Configuration
 
 ```bash
-docker-compose exec agents python -m src.main check
+docker compose exec agents python -m src.main check
 ```
 
 Output shows:
@@ -619,7 +619,7 @@ If you need to reset conversation memory:
 ```bash
 make init-checkpointer
 # or
-docker-compose exec agents python -m src.init_checkpointer
+docker compose exec agents python -m src.init_checkpointer
 ```
 
 ### Common Issues
@@ -627,26 +627,26 @@ docker-compose exec agents python -m src.init_checkpointer
 **API Connection Errors:**
 ```bash
 # Check if services are running
-docker-compose ps
+docker compose ps
 
 # Test API connectivity
-docker-compose exec agents curl http://api:8080/health
-docker-compose exec agents curl http://opensearch:9200
+docker compose exec agents curl http://api:8080/health
+docker compose exec agents curl http://opensearch:9200
 ```
 
 **Missing LLM API Key:**
 ```bash
 # Verify environment variable
-docker-compose exec agents env | grep API_KEY
+docker compose exec agents env | grep API_KEY
 ```
 
 **Checkpointer Errors:**
 ```bash
 # Reinitialize checkpointer tables
-docker-compose exec agents python -m src.init_checkpointer
+docker compose exec agents python -m src.init_checkpointer
 
 # Check PostgreSQL connection
-docker-compose exec agents python -c "from src.config import settings; print(settings.checkpointer_db_url)"
+docker compose exec agents python -c "from src.config import settings; print(settings.checkpointer_db_url)"
 ```
 
 ## Architecture

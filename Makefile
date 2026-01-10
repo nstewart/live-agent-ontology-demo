@@ -1,5 +1,8 @@
 .PHONY: help setup up up-agent up-agent-bundling down logs clean clean-network migrate seed reset-db test lint init-mz init-checkpointer setup-load-gen load-gen load-gen-demo load-gen-standard load-gen-peak load-gen-stress load-gen-demand load-gen-supply load-gen-health test-load-gen
 
+# Detect docker compose command (prefer "docker compose" over "$(DOCKER_COMPOSE)")
+DOCKER_COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; else echo "$(DOCKER_COMPOSE)"; fi)
+
 # Default target
 help:
 	@echo "FreshMart Digital Twin - Available Commands"
@@ -54,28 +57,28 @@ setup:
 		echo "Created .env from .env.example"; \
 	fi
 	@echo "Building Docker images (this will install all dependencies)..."
-	docker-compose build
+	docker compose build
 	@echo ""
 	@echo "Setup complete! Run 'make up' or 'make up-agent' to start services."
 
 # Initialize Materialize
 init-mz:
 	@echo "Initializing Materialize..."
-	docker-compose run --rm -T materialize-init
+	$(DOCKER_COMPOSE) run --rm -T materialize-init
 	@echo "Materialize initialized successfully!"
 
 # Initialize Agent Checkpointer
 init-checkpointer:
 	@echo "Initializing agent checkpointer tables..."
-	docker-compose exec agents env PYTHONPATH=/app python -m src.init_checkpointer
+	$(DOCKER_COMPOSE) exec agents env PYTHONPATH=/app python -m src.init_checkpointer
 
 # Start services
 up:
 	@docker network create freshmart-network 2>/dev/null || true
-	docker-compose build web zero-permissions
+	$(DOCKER_COMPOSE) build web zero-permissions
 	@# Force recreate materialize-init to ensure views are updated based on ENABLE_DELIVERY_BUNDLING
-	docker-compose rm -f materialize-init 2>/dev/null || true
-	docker-compose up -d
+	$(DOCKER_COMPOSE) rm -f materialize-init 2>/dev/null || true
+	$(DOCKER_COMPOSE) up -d
 	@echo ""
 	@echo "Waiting for databases to be ready..."
 	@sleep 5
@@ -97,10 +100,10 @@ up:
 
 up-agent:
 	@docker network create freshmart-network 2>/dev/null || true
-	docker-compose build web zero-permissions
+	$(DOCKER_COMPOSE) build web zero-permissions
 	@# Force recreate materialize-init to ensure views are updated based on ENABLE_DELIVERY_BUNDLING
-	docker-compose rm -f materialize-init 2>/dev/null || true
-	docker-compose --profile agent up -d
+	$(DOCKER_COMPOSE) rm -f materialize-init 2>/dev/null || true
+	$(DOCKER_COMPOSE) --profile agent up -d
 	@echo ""
 	@echo "Waiting for databases to be ready..."
 	@sleep 5
@@ -117,7 +120,7 @@ up-agent:
 	@sleep 3
 	@echo ""
 	@echo "Initializing agent checkpointer..."
-	@docker-compose exec agents env PYTHONPATH=/app python -m src.init_checkpointer
+	@$(DOCKER_COMPOSE) exec agents env PYTHONPATH=/app python -m src.init_checkpointer
 	@echo ""
 	@echo "Note: Materialize is automatically initialized via materialize-init service"
 	@echo "      OpenSearch will be populated automatically once search-sync starts"
@@ -126,10 +129,10 @@ up-agent:
 
 up-agent-bundling:
 	@docker network create freshmart-network 2>/dev/null || true
-	ENABLE_DELIVERY_BUNDLING=true docker-compose build web zero-permissions
+	ENABLE_DELIVERY_BUNDLING=true $(DOCKER_COMPOSE) build web zero-permissions
 	@# Force recreate materialize-init to ensure bundling views are created
-	docker-compose rm -f materialize-init 2>/dev/null || true
-	ENABLE_DELIVERY_BUNDLING=true docker-compose --profile agent up -d
+	$(DOCKER_COMPOSE) rm -f materialize-init 2>/dev/null || true
+	ENABLE_DELIVERY_BUNDLING=true $(DOCKER_COMPOSE) --profile agent up -d
 	@echo ""
 	@echo "Waiting for databases to be ready..."
 	@sleep 5
@@ -146,7 +149,7 @@ up-agent-bundling:
 	@sleep 3
 	@echo ""
 	@echo "Initializing agent checkpointer..."
-	@docker-compose exec agents env PYTHONPATH=/app python -m src.init_checkpointer
+	@$(DOCKER_COMPOSE) exec agents env PYTHONPATH=/app python -m src.init_checkpointer
 	@echo ""
 	@echo "Note: Materialize is automatically initialized via materialize-init service"
 	@echo "      Delivery bundling is ENABLED - expect higher CPU usage (~460s compute time)"
@@ -155,18 +158,18 @@ up-agent-bundling:
 	@echo "All services ready (including agents with delivery bundling)!"
 
 down:
-	docker-compose --profile agent down
+	$(DOCKER_COMPOSE) --profile agent down
 	docker volume rm live-agent-ontology-demo_postgres_data 2>/dev/null
 
 # Logs
 logs:
-	docker-compose logs -f
+	$(DOCKER_COMPOSE) logs -f
 
 logs-api:
-	docker-compose logs -f api
+	$(DOCKER_COMPOSE) logs -f api
 
 logs-sync:
-	docker-compose logs -f search-sync
+	$(DOCKER_COMPOSE) logs -f search-sync
 
 # Database
 migrate:
@@ -174,16 +177,16 @@ migrate:
 
 seed:
 	@echo "Building and running database seeder..."
-	docker-compose --profile seed build db-seed
-	docker-compose --profile seed run --rm db-seed
+	$(DOCKER_COMPOSE) --profile seed build db-seed
+	$(DOCKER_COMPOSE) --profile seed run --rm db-seed
 
 reset-db:
 	@echo "WARNING: This will destroy all data!"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
-	docker-compose down -v
+	$(DOCKER_COMPOSE) down -v
 	docker volume rm freshmart-digital-twin-agent-starter_postgres_data || true
 	docker volume rm freshmart-digital-twin-agent-starter_materialize_data || true
-	docker-compose up -d db mz
+	$(DOCKER_COMPOSE) up -d db mz
 	@echo "Waiting for databases to be ready..."
 	@sleep 5
 	$(MAKE) migrate
@@ -193,19 +196,19 @@ reset-db:
 test: test-api test-web
 
 test-api:
-	docker-compose exec api pytest -v
+	$(DOCKER_COMPOSE) exec api pytest -v
 
 test-web:
-	docker-compose exec web npm test
+	$(DOCKER_COMPOSE) exec web npm test
 
 # Linting
 lint:
-	docker-compose exec api ruff check src/
-	docker-compose exec web npm run lint
+	$(DOCKER_COMPOSE) exec api ruff check src/
+	$(DOCKER_COMPOSE) exec web npm run lint
 
 # Cleanup
 clean:
-	docker-compose --profile agent down -v --rmi local
+	$(DOCKER_COMPOSE) --profile agent down -v --rmi local
 	rm -rf api/__pycache__ api/.pytest_cache
 	rm -rf search-sync/__pycache__
 	rm -rf agents/__pycache__
@@ -220,13 +223,13 @@ clean-network:
 
 # Shell access
 shell-db:
-	docker-compose exec db psql -U $${PG_USER:-postgres} -d $${PG_DATABASE:-freshmart}
+	$(DOCKER_COMPOSE) exec db psql -U $${PG_USER:-postgres} -d $${PG_DATABASE:-freshmart}
 
 shell-mz:
-	docker-compose exec mz psql -U $${MZ_USER:-materialize} -d $${MZ_DATABASE:-materialize}
+	$(DOCKER_COMPOSE) exec mz psql -U $${MZ_USER:-materialize} -d $${MZ_DATABASE:-materialize}
 
 shell-api:
-	docker-compose exec api /bin/bash
+	$(DOCKER_COMPOSE) exec api /bin/bash
 
 # Health check
 health:

@@ -276,7 +276,7 @@ POST /freshmart/orders
 
 ```bash
 # Agent automatically uses live prices
-docker-compose exec agents python -m src.main chat \
+docker compose exec agents python -m src.main chat \
   "Create an order for John at Manhattan store with 2 gallons of milk"
 
 # Agent response:
@@ -362,10 +362,10 @@ ORDER BY avg_adjustment_pct DESC;
 
 ```bash
 # Watch for price changes in real-time
-docker-compose logs -f search-sync | grep "inventory"
+docker compose logs -f search-sync | grep "inventory"
 
 # Or monitor Materialize view updates
-docker-compose logs -f zero-server | grep "inventory"
+docker compose logs -f zero-server | grep "inventory"
 ```
 
 ### Troubleshooting

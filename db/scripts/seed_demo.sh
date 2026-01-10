@@ -6,6 +6,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Detect docker compose command (prefer "docker compose" over "docker-compose")
+if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
 # Load environment variables
 if [ -f "$PROJECT_ROOT/.env" ]; then
     export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
@@ -54,7 +61,7 @@ for seed in "$SCRIPT_DIR/../seed"/*.sql; do
         fi
         echo "Running seed: $filename"
         # Use psql from Docker container to avoid requiring local psql installation
-        docker-compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/seed/$filename"
+        $DOCKER_COMPOSE exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/seed/$filename"
     fi
 done
 
@@ -67,7 +74,7 @@ python3 "$SCRIPT_DIR/generate_load_test_data.py" --scale 0.01
 # Run bundleable orders seed AFTER Python generator creates stores/customers/products
 if [ -f "$SCRIPT_DIR/../seed/demo_bundleable_orders.sql" ]; then
     echo "Running seed: demo_bundleable_orders.sql (bundleable order demo data)"
-    docker-compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/seed/demo_bundleable_orders.sql"
+    $DOCKER_COMPOSE exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/seed/demo_bundleable_orders.sql"
 fi
 
 echo "Seed complete!"

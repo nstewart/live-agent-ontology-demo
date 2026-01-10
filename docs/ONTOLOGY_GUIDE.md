@@ -487,10 +487,10 @@ def transform_event_to_doc(self, data: dict) -> Optional[dict]:
 **4d. Restart the Sync Worker**
 
 ```bash
-docker-compose restart search-sync
+docker compose restart search-sync
 
 # Watch the logs to confirm it's syncing the new view
-docker-compose logs -f search-sync
+docker compose logs -f search-sync
 ```
 
 ### Step 5: Update Agent Tools to Expose Promotion Fields
@@ -552,7 +552,7 @@ return [
 **5d. Restart Agent Service:**
 
 ```bash
-docker-compose restart agents
+docker compose restart agents
 ```
 
 ### Architecture: Complete Data Flow

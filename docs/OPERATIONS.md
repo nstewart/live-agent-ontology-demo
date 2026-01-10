@@ -50,16 +50,16 @@ The system will automatically:
 
 ### Using Docker Compose Directly
 
-If you prefer to use `docker-compose` directly instead of `make`:
+If you prefer to use `docker compose` directly instead of `make`:
 
 ```bash
 # Create persistent network
 docker network create freshmart-network
 
 # Start services
-docker-compose up -d
+docker compose up -d
 # or with agents
-docker-compose --profile agent up -d
+docker compose --profile agent up -d
 
 # Initialize Materialize manually
 ./db/materialize/init.sh
@@ -89,19 +89,19 @@ make help
 
 ```bash
 # Restart the API service
-docker-compose restart api
+docker compose restart api
 
 # Restart all services
-docker-compose restart
+docker compose restart
 
 # Rebuild and restart API (after code changes)
-docker-compose up -d --build api
+docker compose up -d --build api
 
 # Stop all services (network persists)
-docker-compose down
+docker compose down
 
 # Stop and remove volumes (full reset, network still persists)
-docker-compose down -v
+docker compose down -v
 
 # To also remove the persistent network
 make clean-network
@@ -113,10 +113,10 @@ docker network rm freshmart-network
 
 ```bash
 # Check running services
-docker-compose ps
+docker compose ps
 
 # Check individual service
-docker-compose ps api
+docker compose ps api
 
 # View resource usage
 docker stats
@@ -128,35 +128,35 @@ docker stats
 
 ```bash
 # View API logs (with query timing)
-docker-compose logs -f api
+docker compose logs -f api
 
 # View last 100 lines of API logs
-docker-compose logs --tail=100 api
+docker compose logs --tail=100 api
 
 # View logs for multiple services
-docker-compose logs -f api mz
+docker compose logs -f api mz
 
 # View Materialize logs
-docker-compose logs -f mz
+docker compose logs -f mz
 
 # View all service logs
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ### Filter Logs
 
 ```bash
 # Filter by operation type
-docker-compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
+docker compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
 
 # Only show reads
-docker-compose logs -f api | grep "\[SELECT\]"
+docker compose logs -f api | grep "\[SELECT\]"
 
 # Only show slow queries
-docker-compose logs -f api | grep "SLOW QUERY"
+docker compose logs -f api | grep "SLOW QUERY"
 
 # Show database-specific logs
-docker-compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
+docker compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
 ```
 
 ## Query Logging
@@ -189,16 +189,16 @@ Queries exceeding 100ms are logged as warnings:
 
 ```bash
 # Real-time query logs
-docker-compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
+docker compose logs -f api | grep -E "\[Materialize\]|\[PostgreSQL\]"
 
 # Filter by operation type
-docker-compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
+docker compose logs -f api | grep -E "\[INSERT\]|\[UPDATE\]|\[DELETE\]"
 
 # Only show reads (all from Materialize serving cluster)
-docker-compose logs -f api | grep "\[SELECT\]"
+docker compose logs -f api | grep "\[SELECT\]"
 
 # Only show slow queries
-docker-compose logs -f api | grep "SLOW QUERY"
+docker compose logs -f api | grep "SLOW QUERY"
 ```
 
 ## Query Statistics
@@ -252,7 +252,7 @@ Access the Materialize Admin Console at **http://localhost:6874** to monitor:
 
 ```bash
 # Watch query logs - should show [Materialize]
-docker-compose logs -f api | grep -E "\[Materialize\]"
+docker compose logs -f api | grep -E "\[Materialize\]"
 
 # Example output:
 # [Materialize] [SET] 0.68ms: SET CLUSTER = serving | params=()
@@ -267,7 +267,7 @@ docker-compose logs -f api | grep -E "\[Materialize\]"
 
 ```bash
 # View search-sync logs for SUBSCRIBE activity
-docker-compose logs -f search-sync | grep "SUBSCRIBE"
+docker compose logs -f search-sync | grep "SUBSCRIBE"
 
 # Expected healthy output:
 # "Starting SUBSCRIBE for view: orders_search_source_mv"
@@ -275,7 +275,7 @@ docker-compose logs -f search-sync | grep "SUBSCRIBE"
 # "Broadcasting N changes for orders_search_source_mv"
 
 # View zero-server logs for SUBSCRIBE activity
-docker-compose logs -f zero-server | grep -E "Starting SUBSCRIBE|Broadcasting"
+docker compose logs -f zero-server | grep -E "Starting SUBSCRIBE|Broadcasting"
 
 # Expected healthy output:
 # "[orders_flat_mv] Starting SUBSCRIBE (attempt 1)..."
@@ -299,7 +299,7 @@ curl -X PATCH http://localhost:8080/triples/{triple_id} -d '{"object_value": "9.
 curl 'http://localhost:9200/inventory/_search?q=product_name:Milk'
 
 # Check timestamp of last sync
-docker-compose logs --tail=50 search-sync | grep "Broadcasting"
+docker compose logs --tail=50 search-sync | grep "Broadcasting"
 ```
 
 #### Common Issues
@@ -311,7 +311,7 @@ docker-compose logs --tail=50 search-sync | grep "Broadcasting"
 # These are automatically retried - services will reconnect when Materialize is ready
 
 # Check if Materialize is running
-docker-compose ps mz
+docker compose ps mz
 
 # Check if views exist
 PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -d materialize \
@@ -323,8 +323,8 @@ PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -d materialize \
 make init-mz
 
 # Watch automatic retry attempts
-docker-compose logs -f search-sync | grep "Retrying"
-docker-compose logs -f zero-server | grep "Retrying"
+docker compose logs -f search-sync | grep "Retrying"
+docker compose logs -f zero-server | grep "Retrying"
 
 # Services will auto-connect within 30 seconds - no restart needed!
 ```
@@ -333,10 +333,10 @@ docker-compose logs -f zero-server | grep "Retrying"
 
 ```bash
 # Check for backpressure warnings
-docker-compose logs search-sync | grep "backpressure"
+docker compose logs search-sync | grep "backpressure"
 
 # Check OpenSearch bulk operation performance
-docker-compose logs search-sync | grep "bulk_upsert"
+docker compose logs search-sync | grep "bulk_upsert"
 
 # Verify Materialize view is updating
 PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -c \
@@ -361,14 +361,14 @@ OS_INVENTORY=$(curl -s 'http://localhost:9200/inventory/_count' | jq '.count')
 echo "Inventory - Materialize: $MZ_INVENTORY, OpenSearch: $OS_INVENTORY"
 
 # If drift detected, restart search-sync to re-hydrate
-docker-compose restart search-sync
+docker compose restart search-sync
 ```
 
 **Memory/Buffer Issues:**
 
 ```bash
 # Check buffer size metrics in logs
-docker-compose logs search-sync | grep "buffer"
+docker compose logs search-sync | grep "buffer"
 
 # If buffer exceeds 5000, backpressure should activate
 # Check for memory usage spikes
@@ -401,7 +401,7 @@ PGPASSWORD=postgres psql -h localhost -p 5432 -U postgres -d freshmart
 PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -d materialize
 
 # Test from inside API container
-docker-compose exec api python -c "from src.config import settings; print(settings.pg_external_url)"
+docker compose exec api python -c "from src.config import settings; print(settings.pg_external_url)"
 ```
 
 ### Materialize Initialization Issues
@@ -426,13 +426,13 @@ See detailed debugging in [Agents Guide](AGENTS.md#debugging).
 
 ```bash
 # Check configuration
-docker-compose exec agents python -m src.main check
+docker compose exec agents python -m src.main check
 
 # Enable debug logging
-LOG_LEVEL=DEBUG docker-compose --profile agent up agents
+LOG_LEVEL=DEBUG docker compose --profile agent up agents
 
 # Verify LLM API key
-docker-compose exec agents env | grep API_KEY
+docker compose exec agents env | grep API_KEY
 ```
 
 ## Environment Variables

@@ -184,11 +184,11 @@ curl http://localhost:9200/_cluster/health
 
 ```bash
 # Check sync cursor
-docker-compose exec mz psql -U materialize -d materialize -c \
+docker compose exec mz psql -U materialize -d materialize -c \
   "SELECT * FROM sync_cursors"
 
 # Check worker logs
-docker-compose logs -f search-sync
+docker compose logs -f search-sync
 ```
 
 ## Performance Tips

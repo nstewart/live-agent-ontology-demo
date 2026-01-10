@@ -6,6 +6,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Detect docker compose command (prefer "docker compose" over "docker-compose")
+if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
 # Load environment variables
 if [ -f "$PROJECT_ROOT/.env" ]; then
     export $(grep -v '^#' "$PROJECT_ROOT/.env" | xargs)
@@ -28,7 +35,7 @@ for migration in "$SCRIPT_DIR/../migrations"/*.sql; do
         filename=$(basename "$migration")
         echo "Applying migration: $filename"
         # Use psql from Docker container to avoid requiring local psql installation
-        docker-compose exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/migrations/$filename"
+        $DOCKER_COMPOSE exec -T db psql -U "$PG_USER" -d "$PG_DATABASE" -f "/docker-entrypoint-initdb.d/migrations/$filename"
     fi
 done
 
