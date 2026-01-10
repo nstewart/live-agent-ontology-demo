@@ -4,6 +4,13 @@
 
 set -e
 
+# Detect docker compose command (prefer "docker compose" over "docker-compose")
+if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
+else
+    DOCKER_COMPOSE="docker-compose"
+fi
+
 echo "🎬 Demo: Transactional Consistency with Materialize SUBSCRIBE"
 echo "=============================================================="
 echo ""
@@ -21,9 +28,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Check if docker-compose is running
-if ! docker-compose ps | grep -q "search-sync.*Up"; then
+if ! $DOCKER_COMPOSE ps | grep -q "search-sync.*Up"; then
     echo "❌ search-sync service is not running"
-    echo "   Run: docker-compose up -d"
+    echo "   Run: docker compose up -d"
     exit 1
 fi
 
@@ -42,7 +49,7 @@ read
 echo "${GREEN}Starting log tail for api and search-sync services...${NC}"
 echo ""
 
-docker-compose logs -f --tail=0 api search-sync | grep --line-buffered -E "🔵|📝|✅|📦|💾|➕|🔄|❌|mz_ts=" &
+$DOCKER_COMPOSE logs -f --tail=0 api search-sync | grep --line-buffered -E "🔵|📝|✅|📦|💾|➕|🔄|❌|mz_ts=" &
 LOG_PID=$!
 
 # Give logs time to start
@@ -224,7 +231,7 @@ cat > /tmp/demo_order.json << EOF
 EOF
 
 # Submit the transaction
-docker-compose exec -T api curl -s -X POST http://localhost:8080/triples/batch \
+$DOCKER_COMPOSE exec -T api curl -s -X POST http://localhost:8080/triples/batch \
   -H "Content-Type: application/json" \
   -d @/tmp/demo_order.json > /dev/null
 
@@ -252,7 +259,7 @@ read
 
 echo "${GREEN}Updating order status...${NC}"
 
-docker-compose exec -T db psql -U postgres -d freshmart -c \
+$DOCKER_COMPOSE exec -T db psql -U postgres -d freshmart -c \
   "UPDATE triples SET object_value='PICKING', updated_at=NOW() WHERE subject_id='${ORDER_ID}' AND predicate='order_status';" \
   > /dev/null
 
@@ -274,7 +281,7 @@ echo "Press Enter to query OpenSearch..."
 read
 
 echo "${GREEN}Querying OpenSearch...${NC}"
-docker-compose exec -T opensearch curl -s "http://localhost:9200/orders/_doc/${ORDER_ID}?pretty" | \
+$DOCKER_COMPOSE exec -T opensearch curl -s "http://localhost:9200/orders/_doc/${ORDER_ID}?pretty" | \
   grep -E '"order_id"|"order_status"|"line_items"' | head -10
 
 echo ""
@@ -295,10 +302,10 @@ rm -f /tmp/demo_order.json
 echo "To watch logs manually:"
 echo ""
 echo "  # Full flow (PostgreSQL → Materialize → OpenSearch)"
-echo "  docker-compose logs -f api search-sync | grep -E '🔵|📝|✅|📦|💾|➕|🔄|❌'"
+echo "  $DOCKER_COMPOSE logs -f api search-sync | grep -E '🔵|📝|✅|📦|💾|➕|🔄|❌'"
 echo ""
 echo "  # Just PostgreSQL transactions"
-echo "  docker-compose logs -f api | grep -E '🔵|📝|✅'"
+echo "  $DOCKER_COMPOSE logs -f api | grep -E '🔵|📝|✅'"
 echo ""
 echo "  # Just SUBSCRIBE events and OpenSearch flushes"
-echo "  docker-compose logs -f search-sync | grep -E '📦|💾|➕|🔄|❌'"
+echo "  $DOCKER_COMPOSE logs -f search-sync | grep -E '📦|💾|➕|🔄|❌'"
