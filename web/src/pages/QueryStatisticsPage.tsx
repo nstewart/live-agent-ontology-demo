@@ -1180,178 +1180,6 @@ export default function QueryStatisticsPage() {
               </div>
             </div>
 
-            {/* Statistics Table */}
-            <div className="bg-gray-50 rounded-lg mb-6">
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5" />
-                  Query Statistics - Orders with Lines View
-                </h3>
-                <p className="text-xs text-gray-500 mt-1">
-                  Response Time = query latency | Reaction Time = freshness (NOW - effective_updated_at) | QPS = queries/second throughput
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                        Source
-                      </th>
-                      <th
-                        colSpan={3}
-                        className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l"
-                      >
-                        <div className="flex items-center justify-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Response Time (ms)
-                        </div>
-                      </th>
-                      <th
-                        colSpan={3}
-                        className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l"
-                      >
-                        <div className="flex items-center justify-center gap-1">
-                          <Activity className="h-3 w-3" />
-                          Reaction Time (ms)
-                        </div>
-                      </th>
-                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l">
-                        <div className="flex items-center justify-center gap-1">
-                          <Zap className="h-3 w-3" />
-                          QPS
-                        </div>
-                      </th>
-                    </tr>
-                    <tr className="bg-gray-100">
-                      <th></th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400 border-l">
-                        Median
-                      </th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400">P99</th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400">Max</th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400 border-l">
-                        Median
-                      </th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400">P99</th>
-                      <th className="px-2 py-1 text-center text-xs text-gray-400">Max</th>
-                      <th className="border-l"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200 bg-white">
-                    {/* PostgreSQL View Row */}
-                    <tr className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Database className="h-4 w-4 text-orange-500" />
-                          <div>
-                            <div className="font-medium text-gray-900">PostgreSQL View</div>
-                            <div className="text-xs text-gray-500">Fresh but SLOW (computes on every query)</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-2 py-3 text-center border-l font-mono text-orange-600 font-semibold">
-                        {formatMs(metrics?.postgresql_view?.response_time?.median)}
-                      </td>
-                      <td className="px-2 py-3 text-center font-mono text-orange-600">
-                        {formatMs(metrics?.postgresql_view?.response_time?.p99)}
-                      </td>
-                      <td className="px-2 py-3 text-center font-mono text-orange-600">
-                        {formatMs(metrics?.postgresql_view?.response_time?.max)}
-                      </td>
-                      <td className="px-2 py-3 text-center border-l font-mono">
-                        {formatMs(metrics?.postgresql_view?.reaction_time?.median)}
-                      </td>
-                      <td className="px-2 py-3 text-center font-mono">
-                        {formatMs(metrics?.postgresql_view?.reaction_time?.p99)}
-                      </td>
-                      <td className="px-2 py-3 text-center font-mono">
-                        {formatMs(metrics?.postgresql_view?.reaction_time?.max)}
-                      </td>
-                      <td className="px-2 py-3 text-center border-l font-mono text-orange-600 font-semibold">
-                        {metrics?.postgresql_view?.qps?.toFixed(1) || 0}
-                      </td>
-                    </tr>
-
-                    {/* Batch Cache Row - shown in batch and materialize modes */}
-                    {(viewMode === 'batch' || viewMode === 'materialize') && (
-                      <tr className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-green-500" />
-                            <div>
-                              <div className="font-medium text-gray-900">Batch MATERIALIZED VIEW</div>
-                              <div className="text-xs text-gray-500">Fast but STALE (refreshes every 60s)</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono">
-                          {formatMs(metrics?.batch_cache?.response_time?.median)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono">
-                          {formatMs(metrics?.batch_cache?.response_time?.p99)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono">
-                          {formatMs(metrics?.batch_cache?.response_time?.max)}
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
-                          {formatMs(metrics?.batch_cache?.reaction_time?.median)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono text-green-600">
-                          {formatMs(metrics?.batch_cache?.reaction_time?.p99)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono text-green-600">
-                          {formatMs(metrics?.batch_cache?.reaction_time?.max)}
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
-                          {metrics?.batch_cache?.qps?.toFixed(1) || 0}
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Materialize Row - shown only in materialize mode */}
-                    {viewMode === 'materialize' && (
-                      <tr className="hover:bg-gray-50 bg-blue-50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <Zap className="h-4 w-4 text-blue-500" />
-                            <div>
-                              <div className="font-medium text-gray-900 flex items-center gap-1">
-                                Materialize
-                                <span className="text-xs text-blue-600 font-normal bg-blue-100 px-1 rounded">Best</span>
-                              </div>
-                              <div className="text-xs text-gray-500">Fast AND Fresh (incremental via CDC)</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono">
-                          {formatMs(metrics?.materialize?.response_time?.median)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono">
-                          {formatMs(metrics?.materialize?.response_time?.p99)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono">
-                          {formatMs(metrics?.materialize?.response_time?.max)}
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
-                          {formatMs(metrics?.materialize?.reaction_time?.median)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
-                          {formatMs(metrics?.materialize?.reaction_time?.p99)}
-                        </td>
-                        <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
-                          {formatMs(metrics?.materialize?.reaction_time?.max)}
-                        </td>
-                        <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
-                          {metrics?.materialize?.qps?.toFixed(1) || 0}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
             {/* Response Time and Reaction Time Charts - Stacked */}
             <div className="space-y-4 mb-6">
               {/* Response Time Chart */}
@@ -1544,6 +1372,178 @@ export default function QueryStatisticsPage() {
                     )}
                   </LineChart>
                 </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Statistics Table */}
+            <div className="bg-gray-50 rounded-lg mb-6">
+              <div className="p-4 border-b border-gray-200">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  Query Statistics - Orders with Lines View
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Response Time = query latency | Reaction Time = freshness (NOW - effective_updated_at) | QPS = queries/second throughput
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                        Source
+                      </th>
+                      <th
+                        colSpan={3}
+                        className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          Response Time (ms)
+                        </div>
+                      </th>
+                      <th
+                        colSpan={3}
+                        className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l"
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <Activity className="h-3 w-3" />
+                          Reaction Time (ms)
+                        </div>
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase border-l">
+                        <div className="flex items-center justify-center gap-1">
+                          <Zap className="h-3 w-3" />
+                          QPS
+                        </div>
+                      </th>
+                    </tr>
+                    <tr className="bg-gray-100">
+                      <th></th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400 border-l">
+                        Median
+                      </th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400">P99</th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400">Max</th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400 border-l">
+                        Median
+                      </th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400">P99</th>
+                      <th className="px-2 py-1 text-center text-xs text-gray-400">Max</th>
+                      <th className="border-l"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 bg-white">
+                    {/* PostgreSQL View Row */}
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Database className="h-4 w-4 text-orange-500" />
+                          <div>
+                            <div className="font-medium text-gray-900">PostgreSQL View</div>
+                            <div className="text-xs text-gray-500">Fresh but SLOW (computes on every query)</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-2 py-3 text-center border-l font-mono text-orange-600 font-semibold">
+                        {formatMs(metrics?.postgresql_view?.response_time?.median)}
+                      </td>
+                      <td className="px-2 py-3 text-center font-mono text-orange-600">
+                        {formatMs(metrics?.postgresql_view?.response_time?.p99)}
+                      </td>
+                      <td className="px-2 py-3 text-center font-mono text-orange-600">
+                        {formatMs(metrics?.postgresql_view?.response_time?.max)}
+                      </td>
+                      <td className="px-2 py-3 text-center border-l font-mono">
+                        {formatMs(metrics?.postgresql_view?.reaction_time?.median)}
+                      </td>
+                      <td className="px-2 py-3 text-center font-mono">
+                        {formatMs(metrics?.postgresql_view?.reaction_time?.p99)}
+                      </td>
+                      <td className="px-2 py-3 text-center font-mono">
+                        {formatMs(metrics?.postgresql_view?.reaction_time?.max)}
+                      </td>
+                      <td className="px-2 py-3 text-center border-l font-mono text-orange-600 font-semibold">
+                        {metrics?.postgresql_view?.qps?.toFixed(1) || 0}
+                      </td>
+                    </tr>
+
+                    {/* Batch Cache Row - shown in batch and materialize modes */}
+                    {(viewMode === 'batch' || viewMode === 'materialize') && (
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-green-500" />
+                            <div>
+                              <div className="font-medium text-gray-900">Batch MATERIALIZED VIEW</div>
+                              <div className="text-xs text-gray-500">Fast but STALE (refreshes every 60s)</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono">
+                          {formatMs(metrics?.batch_cache?.response_time?.median)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono">
+                          {formatMs(metrics?.batch_cache?.response_time?.p99)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono">
+                          {formatMs(metrics?.batch_cache?.response_time?.max)}
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
+                          {formatMs(metrics?.batch_cache?.reaction_time?.median)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono text-green-600">
+                          {formatMs(metrics?.batch_cache?.reaction_time?.p99)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono text-green-600">
+                          {formatMs(metrics?.batch_cache?.reaction_time?.max)}
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono text-green-600 font-semibold">
+                          {metrics?.batch_cache?.qps?.toFixed(1) || 0}
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Materialize Row - shown only in materialize mode */}
+                    {viewMode === 'materialize' && (
+                      <tr className="hover:bg-gray-50 bg-blue-50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-blue-500" />
+                            <div>
+                              <div className="font-medium text-gray-900 flex items-center gap-1">
+                                Materialize
+                                <span className="text-xs text-blue-600 font-normal bg-blue-100 px-1 rounded">Best</span>
+                              </div>
+                              <div className="text-xs text-gray-500">Fast AND Fresh (incremental via CDC)</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono">
+                          {formatMs(metrics?.materialize?.response_time?.median)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono">
+                          {formatMs(metrics?.materialize?.response_time?.p99)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono">
+                          {formatMs(metrics?.materialize?.response_time?.max)}
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
+                          {formatMs(metrics?.materialize?.reaction_time?.median)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
+                          {formatMs(metrics?.materialize?.reaction_time?.p99)}
+                        </td>
+                        <td className="px-2 py-3 text-center font-mono text-blue-600 font-semibold">
+                          {formatMs(metrics?.materialize?.reaction_time?.max)}
+                        </td>
+                        <td className="px-2 py-3 text-center border-l font-mono text-blue-600 font-semibold">
+                          {metrics?.materialize?.qps?.toFixed(1) || 0}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
