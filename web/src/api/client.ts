@@ -208,8 +208,10 @@ export interface SubjectCounts {
 }
 
 export const triplesApi = {
-  list: (params?: { subject_id?: string; predicate?: string }) =>
+  list: (params?: { subject_id?: string; subject_ids?: string; predicate?: string }) =>
     apiClient.get<Triple[]>('/triples', { params }),
+  listForSubjects: (subjectIds: string[]) =>
+    apiClient.get<Triple[]>('/triples', { params: { subject_ids: subjectIds.join(',') } }),
   create: (data: TripleCreate) => apiClient.post<Triple>('/triples', data),
   createBatch: (triples: TripleCreate[]) => apiClient.post<Triple[]>('/triples/batch', triples),
   upsertBatch: (triples: TripleCreate[]) => apiClient.put<Triple[]>('/triples/batch', triples),

@@ -218,11 +218,11 @@ export function PropagationProvider({ children }: { children: React.ReactNode })
     pollForEvents();
     pollForSourceWrites();
 
-    // Then poll every 500ms
+    // Then poll every 2000ms (reduced from 500ms to prevent connection exhaustion)
     pollIntervalRef.current = setInterval(() => {
       pollForEvents();
       pollForSourceWrites();
-    }, 500);
+    }, 2000);
 
     return () => {
       if (pollIntervalRef.current) {

@@ -527,8 +527,8 @@ export default function QueryStatisticsPage() {
   const [orderData, setOrderData] = useState<OrderDataResponse | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [responseTimeChartData, setResponseTimeChartData] = useState<ChartDataPoint[]>([]);
-  const [useLogScale, setUseLogScale] = useState(true);
-  const [useLogScaleResponseTime, setUseLogScaleResponseTime] = useState(true);
+  const [useLogScale, setUseLogScale] = useState(false);
+  const [useLogScaleResponseTime, setUseLogScaleResponseTime] = useState(false);
   const [lineageGraphOpen, setLineageGraphOpen] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -1267,7 +1267,7 @@ export default function QueryStatisticsPage() {
                         type="monotone"
                         dataKey="materialize"
                         name="Materialize"
-                        stroke="#3b82f6"
+                        stroke="#a855f7"
                         strokeWidth={2}
                         dot={false}
                         connectNulls
@@ -1363,7 +1363,7 @@ export default function QueryStatisticsPage() {
                         type="monotone"
                         dataKey="materialize"
                         name="Materialize"
-                        stroke="#3b82f6"
+                        stroke="#a855f7"
                         strokeWidth={2}
                         dot={false}
                         connectNulls

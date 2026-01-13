@@ -47,22 +47,20 @@ export const WhatAreTriplesCard = ({
     setIsLoading(true);
     setError(null);
     try {
-      // Fetch triples for the order
-      const orderTriples = await triplesApi.list({ subject_id: selectedOrderId });
+      // Fetch triples for order and all line items in a single request
+      const allSubjectIds = [selectedOrderId, ...lineItemIds];
+      const response = await triplesApi.listForSubjects(allSubjectIds);
 
-      // Fetch triples for each order line
-      const lineTriplePromises = lineItemIds.map((lineId) =>
-        triplesApi.list({ subject_id: lineId })
-      );
-      const lineTripleResults = await Promise.all(lineTriplePromises);
+      // Sort so order triples come first, then orderlines
+      const sortedTriples = response.data.sort((a, b) => {
+        const aIsOrder = a.subject_id === selectedOrderId;
+        const bIsOrder = b.subject_id === selectedOrderId;
+        if (aIsOrder && !bIsOrder) return -1;
+        if (!aIsOrder && bIsOrder) return 1;
+        return a.subject_id.localeCompare(b.subject_id);
+      });
 
-      // Combine all triples: order first, then orderlines
-      const allTriples = [
-        ...orderTriples.data,
-        ...lineTripleResults.flatMap((result) => result.data),
-      ];
-
-      setTriples(allTriples);
+      setTriples(sortedTriples);
     } catch (error) {
       console.error("Failed to fetch triples:", error);
       setTriples([]);

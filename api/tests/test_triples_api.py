@@ -60,6 +60,42 @@ class TestTriplesAPI:
             assert response1.json()[0]["id"] != response2.json()[0]["id"]
 
     @pytest.mark.asyncio
+    async def test_list_triples_with_subject_ids_batch(self, async_client: AsyncClient):
+        """GET /triples?subject_ids fetches multiple subjects in one request."""
+        # Get two different subjects
+        subjects_response = await async_client.get("/triples/subjects/list", params={"limit": 2})
+        assert subjects_response.status_code == 200
+        subjects = subjects_response.json()
+
+        if len(subjects) < 2:
+            pytest.skip("Need at least 2 subjects for batch test")
+
+        # Fetch each subject individually
+        response1 = await async_client.get("/triples", params={"subject_id": subjects[0]})
+        response2 = await async_client.get("/triples", params={"subject_id": subjects[1]})
+        assert response1.status_code == 200
+        assert response2.status_code == 200
+
+        individual_count = len(response1.json()) + len(response2.json())
+
+        # Fetch both subjects in a single batch request
+        batch_response = await async_client.get(
+            "/triples", params={"subject_ids": f"{subjects[0]},{subjects[1]}"}
+        )
+        assert batch_response.status_code == 200
+
+        batch_triples = batch_response.json()
+        batch_count = len(batch_triples)
+
+        # Batch should return same count as individual requests combined
+        assert batch_count == individual_count
+
+        # Verify both subjects are represented in the results
+        subject_ids_in_results = set(t["subject_id"] for t in batch_triples)
+        assert subjects[0] in subject_ids_in_results
+        assert subjects[1] in subject_ids_in_results
+
+    @pytest.mark.asyncio
     async def test_get_triple_not_found(self, async_client: AsyncClient):
         """GET /triples/{id} returns 404 for non-existent triple."""
         response = await async_client.get("/triples/99999999")
