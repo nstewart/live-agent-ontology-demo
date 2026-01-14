@@ -440,8 +440,12 @@ async def run_assistant(user_message: str, thread_id: str = "default", stream_ev
                     if "messages" in tools_data and tools_data["messages"]:
                         for msg in tools_data["messages"]:
                             if isinstance(msg, ToolMessage):
-                                # Extract tool name from the message
-                                content_preview = str(msg.content)[:100]
+                                # Extract tool name from the message with truncation indicator
+                                content_str = str(msg.content)
+                                if len(content_str) > 150:
+                                    content_preview = content_str[:150] + "..."
+                                else:
+                                    content_preview = content_str
                                 yield ("tool_result", {"content": content_preview})
 
             # Yield final response

@@ -12,6 +12,13 @@ function formatTime(timestamp: number): string {
   });
 }
 
+// Truncate long content and add ellipsis indicator
+function truncateContent(content: string | undefined, maxLength: number = 200): { text: string; truncated: boolean } {
+  if (!content) return { text: '', truncated: false };
+  if (content.length <= maxLength) return { text: content, truncated: false };
+  return { text: content.slice(0, maxLength), truncated: true };
+}
+
 // Thinking indicator component - shows tool calls and thinking in real-time
 function ThinkingDisplay({ events, isLive }: { events: ThinkingEvent[]; isLive: boolean }) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -36,9 +43,15 @@ function ThinkingDisplay({ events, isLive }: { events: ThinkingEvent[]; isLive: 
                   <span className="text-blue-400">Calling</span>
                   <span className="font-mono text-cyan-400">{event.data.name}</span>
                   {event.data.args && Object.keys(event.data.args).length > 0 && (
-                    <span className="text-gray-500 truncate max-w-[200px]">
-                      ({Object.entries(event.data.args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})
-                    </span>
+                    (() => {
+                      const argsStr = Object.entries(event.data.args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+                      const { text, truncated } = truncateContent(argsStr, 100);
+                      return (
+                        <span className="text-gray-500">
+                          ({text}{truncated && '...'})
+                        </span>
+                      );
+                    })()
                   )}
                 </div>
               )}
@@ -106,40 +119,69 @@ function MessageBubble({ message, isStreaming }: { message: ChatMessage; isStrea
   );
 }
 
-// Chat input component
+// Chat input component with auto-growing textarea
 function ChatInput() {
   const { sendMessage, isStreaming } = useChat();
   const [input, setInput] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isStreaming) {
       sendMessage(input);
       setInput('');
+      // Reset textarea height after sending
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
+  };
+
+  // Handle Enter to submit, Shift+Enter for new line
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (input.trim() && !isStreaming) {
+        sendMessage(input);
+        setInput('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+    }
+  };
+
+  // Auto-resize textarea as content grows
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Reset height to auto to get the correct scrollHeight
+    e.target.style.height = 'auto';
+    // Set height to scrollHeight, capped at 150px
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
   };
 
   // Focus input when widget opens
   useEffect(() => {
-    inputRef.current?.focus();
+    textareaRef.current?.focus();
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 p-3 border-t border-gray-700">
-      <input
-        ref={inputRef}
-        type="text"
+    <form onSubmit={handleSubmit} className="flex gap-2 p-3 border-t border-gray-700 items-end">
+      <textarea
+        ref={textareaRef}
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
         placeholder="Ask the operations assistant..."
         disabled={isStreaming}
-        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+        rows={1}
+        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 resize-none overflow-y-auto"
+        style={{ minHeight: '40px', maxHeight: '150px' }}
       />
       <button
         type="submit"
         disabled={!input.trim() || isStreaming}
-        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-1"
+        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-1 shrink-0"
       >
         <Send className="h-4 w-4" />
       </button>
