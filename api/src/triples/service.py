@@ -121,6 +121,36 @@ class TripleService:
             updated_at=row.updated_at,
         )
 
+    async def list_triples_for_subjects(self, subject_ids: list[str], limit: int = 1000) -> list[Triple]:
+        """List triples for multiple subjects in a single query."""
+        if not subject_ids:
+            return []
+
+        # Use ANY() for efficient IN query with array parameter
+        query = """
+            SELECT id, subject_id, predicate, object_value, object_type,
+                   created_at, updated_at
+            FROM triples
+            WHERE subject_id = ANY(:subject_ids)
+            ORDER BY subject_id, predicate
+            LIMIT :limit
+        """
+
+        result = await self.session.execute(text(query), {"subject_ids": subject_ids, "limit": limit})
+        rows = result.fetchall()
+        return [
+            Triple(
+                id=row.id,
+                subject_id=row.subject_id,
+                predicate=row.predicate,
+                object_value=row.object_value,
+                object_type=row.object_type,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
     async def get_subject(self, subject_id: str) -> SubjectInfo:
         """Get all triples for a subject."""
         # Get triples

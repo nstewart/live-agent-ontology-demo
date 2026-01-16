@@ -527,8 +527,8 @@ export default function QueryStatisticsPage() {
   const [orderData, setOrderData] = useState<OrderDataResponse | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [responseTimeChartData, setResponseTimeChartData] = useState<ChartDataPoint[]>([]);
-  const [useLogScale, setUseLogScale] = useState(true);
-  const [useLogScaleResponseTime, setUseLogScaleResponseTime] = useState(true);
+  const [useLogScale, setUseLogScale] = useState(false);
+  const [useLogScaleResponseTime, setUseLogScaleResponseTime] = useState(false);
   const [lineageGraphOpen, setLineageGraphOpen] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState<number>(Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -1180,6 +1180,201 @@ export default function QueryStatisticsPage() {
               </div>
             </div>
 
+            {/* Response Time and Reaction Time Charts - Stacked */}
+            <div className="space-y-4 mb-6">
+              {/* Response Time Chart */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-900">Response Time Over Time (p99/sec)</h4>
+                    <p className="text-xs text-gray-500">
+                      Query latency: how long does each query take to execute?
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setUseLogScaleResponseTime(false)}
+                      className={`px-2 py-1 text-xs rounded ${!useLogScaleResponseTime ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    >
+                      Linear
+                    </button>
+                    <button
+                      onClick={() => setUseLogScaleResponseTime(true)}
+                      className={`px-2 py-1 text-xs rounded ${useLogScaleResponseTime ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    >
+                      Log
+                    </button>
+                  </div>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={responseTimeChartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="time"
+                      tickFormatter={(t) => {
+                        const date = new Date(t);
+                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')}`;
+                      }}
+                      domain={[lastUpdateTime - 180000, lastUpdateTime]}
+                      type="number"
+                      fontSize={10}
+                      tick={{ fill: "#6b7280" }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      scale={useLogScaleResponseTime ? "log" : "linear"}
+                      domain={useLogScaleResponseTime ? [1, "auto"] : [0, "auto"]}
+                      tickFormatter={(v) =>
+                        v >= 1000 ? `${(v / 1000).toFixed(0)}s` : `${v.toFixed(0)}ms`
+                      }
+                      fontSize={10}
+                      tick={{ fill: "#6b7280" }}
+                      allowDataOverflow={useLogScaleResponseTime}
+                    />
+                    <Tooltip
+                      formatter={(value: number | undefined) => [value !== undefined ? `${value.toFixed(1)}ms` : "-", ""]}
+                      labelFormatter={(t) => {
+                        const date = new Date(t as number);
+                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')} UTC`;
+                      }}
+                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px' }} />
+                    <Line
+                      type="monotone"
+                      dataKey="postgresql"
+                      name="PostgreSQL View"
+                      stroke="#f97316"
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                    {(viewMode === 'batch' || viewMode === 'materialize') && (
+                      <Line
+                        type="monotone"
+                        dataKey="batch"
+                        name="Batch Cache"
+                        stroke="#22c55e"
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    )}
+                    {viewMode === 'materialize' && (
+                      <Line
+                        type="monotone"
+                        dataKey="materialize"
+                        name="Materialize"
+                        stroke="#a855f7"
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Reaction Time Chart */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-900">Reaction Time Over Time (p99/sec)</h4>
+                    <p className="text-xs text-gray-500">
+                      Data freshness: how stale is the data when the query completes?
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setUseLogScale(false)}
+                      className={`px-2 py-1 text-xs rounded ${!useLogScale ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    >
+                      Linear
+                    </button>
+                    <button
+                      onClick={() => setUseLogScale(true)}
+                      className={`px-2 py-1 text-xs rounded ${useLogScale ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
+                    >
+                      Log
+                    </button>
+                  </div>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis
+                      dataKey="time"
+                      tickFormatter={(t) => {
+                        const date = new Date(t);
+                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')}`;
+                      }}
+                      domain={[lastUpdateTime - 180000, lastUpdateTime]}
+                      type="number"
+                      fontSize={10}
+                      tick={{ fill: "#6b7280" }}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      scale={useLogScale ? "log" : "linear"}
+                      domain={useLogScale ? [1, "auto"] : [0, "auto"]}
+                      tickFormatter={(v) =>
+                        v >= 1000 ? `${(v / 1000).toFixed(0)}s` : `${v.toFixed(0)}ms`
+                      }
+                      fontSize={10}
+                      tick={{ fill: "#6b7280" }}
+                      allowDataOverflow={useLogScale}
+                    />
+                    <Tooltip
+                      formatter={(value: number | undefined) => [value !== undefined ? `${value.toFixed(1)}ms` : "-", ""]}
+                      labelFormatter={(t) => {
+                        const date = new Date(t as number);
+                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')} UTC`;
+                      }}
+                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px' }} />
+                    <Line
+                      type="monotone"
+                      dataKey="postgresql"
+                      name="PostgreSQL View"
+                      stroke="#f97316"
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                    {(viewMode === 'batch' || viewMode === 'materialize') && (
+                      <Line
+                        type="monotone"
+                        dataKey="batch"
+                        name="Batch Cache"
+                        stroke="#22c55e"
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    )}
+                    {viewMode === 'materialize' && (
+                      <Line
+                        type="monotone"
+                        dataKey="materialize"
+                        name="Materialize"
+                        stroke="#a855f7"
+                        strokeWidth={2}
+                        dot={false}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Statistics Table */}
             <div className="bg-gray-50 rounded-lg mb-6">
               <div className="p-4 border-b border-gray-200">
@@ -1349,201 +1544,6 @@ export default function QueryStatisticsPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
-            </div>
-
-            {/* Response Time and Reaction Time Charts - Stacked */}
-            <div className="space-y-4 mb-6">
-              {/* Response Time Chart */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Response Time Over Time (p99/sec)</h4>
-                    <p className="text-xs text-gray-500">
-                      Query latency: how long does each query take to execute?
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setUseLogScaleResponseTime(false)}
-                      className={`px-2 py-1 text-xs rounded ${!useLogScaleResponseTime ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Linear
-                    </button>
-                    <button
-                      onClick={() => setUseLogScaleResponseTime(true)}
-                      className={`px-2 py-1 text-xs rounded ${useLogScaleResponseTime ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Log
-                    </button>
-                  </div>
-                </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={responseTimeChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="time"
-                      tickFormatter={(t) => {
-                        const date = new Date(t);
-                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')}`;
-                      }}
-                      domain={[lastUpdateTime - 180000, lastUpdateTime]}
-                      type="number"
-                      fontSize={10}
-                      tick={{ fill: "#6b7280" }}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      scale={useLogScaleResponseTime ? "log" : "linear"}
-                      domain={useLogScaleResponseTime ? [1, "auto"] : [0, "auto"]}
-                      tickFormatter={(v) =>
-                        v >= 1000 ? `${(v / 1000).toFixed(0)}s` : `${v.toFixed(0)}ms`
-                      }
-                      fontSize={10}
-                      tick={{ fill: "#6b7280" }}
-                      allowDataOverflow={useLogScaleResponseTime}
-                    />
-                    <Tooltip
-                      formatter={(value: number | undefined) => [value !== undefined ? `${value.toFixed(1)}ms` : "-", ""]}
-                      labelFormatter={(t) => {
-                        const date = new Date(t as number);
-                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')} UTC`;
-                      }}
-                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '10px' }} />
-                    <Line
-                      type="monotone"
-                      dataKey="postgresql"
-                      name="PostgreSQL View"
-                      stroke="#f97316"
-                      strokeWidth={2}
-                      dot={false}
-                      connectNulls
-                      isAnimationActive={false}
-                    />
-                    {(viewMode === 'batch' || viewMode === 'materialize') && (
-                      <Line
-                        type="monotone"
-                        dataKey="batch"
-                        name="Batch Cache"
-                        stroke="#22c55e"
-                        strokeWidth={2}
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                      />
-                    )}
-                    {viewMode === 'materialize' && (
-                      <Line
-                        type="monotone"
-                        dataKey="materialize"
-                        name="Materialize"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                      />
-                    )}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Reaction Time Chart */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-semibold text-gray-900">Reaction Time Over Time (p99/sec)</h4>
-                    <p className="text-xs text-gray-500">
-                      Data freshness: how stale is the data when the query completes?
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setUseLogScale(false)}
-                      className={`px-2 py-1 text-xs rounded ${!useLogScale ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Linear
-                    </button>
-                    <button
-                      onClick={() => setUseLogScale(true)}
-                      className={`px-2 py-1 text-xs rounded ${useLogScale ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}
-                    >
-                      Log
-                    </button>
-                  </div>
-                </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis
-                      dataKey="time"
-                      tickFormatter={(t) => {
-                        const date = new Date(t);
-                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')}`;
-                      }}
-                      domain={[lastUpdateTime - 180000, lastUpdateTime]}
-                      type="number"
-                      fontSize={10}
-                      tick={{ fill: "#6b7280" }}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      scale={useLogScale ? "log" : "linear"}
-                      domain={useLogScale ? [1, "auto"] : [0, "auto"]}
-                      tickFormatter={(v) =>
-                        v >= 1000 ? `${(v / 1000).toFixed(0)}s` : `${v.toFixed(0)}ms`
-                      }
-                      fontSize={10}
-                      tick={{ fill: "#6b7280" }}
-                      allowDataOverflow={useLogScale}
-                    />
-                    <Tooltip
-                      formatter={(value: number | undefined) => [value !== undefined ? `${value.toFixed(1)}ms` : "-", ""]}
-                      labelFormatter={(t) => {
-                        const date = new Date(t as number);
-                        return `${date.getUTCHours().toString().padStart(2, '0')}:${date.getUTCMinutes().toString().padStart(2, '0')}:${date.getUTCSeconds().toString().padStart(2, '0')} UTC`;
-                      }}
-                      contentStyle={{ backgroundColor: "#fff", border: "1px solid #e5e7eb" }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: '10px' }} />
-                    <Line
-                      type="monotone"
-                      dataKey="postgresql"
-                      name="PostgreSQL View"
-                      stroke="#f97316"
-                      strokeWidth={2}
-                      dot={false}
-                      connectNulls
-                      isAnimationActive={false}
-                    />
-                    {(viewMode === 'batch' || viewMode === 'materialize') && (
-                      <Line
-                        type="monotone"
-                        dataKey="batch"
-                        name="Batch Cache"
-                        stroke="#22c55e"
-                        strokeWidth={2}
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                      />
-                    )}
-                    {viewMode === 'materialize' && (
-                      <Line
-                        type="monotone"
-                        dataKey="materialize"
-                        name="Materialize"
-                        stroke="#3b82f6"
-                        strokeWidth={2}
-                        dot={false}
-                        connectNulls
-                        isAnimationActive={false}
-                      />
-                    )}
-                  </LineChart>
-                </ResponsiveContainer>
               </div>
             </div>
 

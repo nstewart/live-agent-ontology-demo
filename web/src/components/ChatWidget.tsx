@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { MessageCircle, Trash2, X, Send, ChevronDown, ChevronRight } from 'lucide-react';
+import { MessageCircle, Trash2, X, Send, ChevronDown, ChevronRight, Maximize2, Minimize2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useChat, ChatMessage, ThinkingEvent } from '../contexts/ChatContext';
 
@@ -10,6 +10,13 @@ function formatTime(timestamp: number): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+// Truncate long content and add ellipsis indicator
+function truncateContent(content: string | undefined, maxLength: number = 200): { text: string; truncated: boolean } {
+  if (!content) return { text: '', truncated: false };
+  if (content.length <= maxLength) return { text: content, truncated: false };
+  return { text: content.slice(0, maxLength), truncated: true };
 }
 
 // Thinking indicator component - shows tool calls and thinking in real-time
@@ -36,9 +43,15 @@ function ThinkingDisplay({ events, isLive }: { events: ThinkingEvent[]; isLive: 
                   <span className="text-blue-400">Calling</span>
                   <span className="font-mono text-cyan-400">{event.data.name}</span>
                   {event.data.args && Object.keys(event.data.args).length > 0 && (
-                    <span className="text-gray-500 truncate max-w-[200px]">
-                      ({Object.entries(event.data.args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})
-                    </span>
+                    (() => {
+                      const argsStr = Object.entries(event.data.args).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ');
+                      const { text, truncated } = truncateContent(argsStr, 100);
+                      return (
+                        <span className="text-gray-500">
+                          ({text}{truncated && '...'})
+                        </span>
+                      );
+                    })()
                   )}
                 </div>
               )}
@@ -106,40 +119,69 @@ function MessageBubble({ message, isStreaming }: { message: ChatMessage; isStrea
   );
 }
 
-// Chat input component
+// Chat input component with auto-growing textarea
 function ChatInput() {
   const { sendMessage, isStreaming } = useChat();
   const [input, setInput] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isStreaming) {
       sendMessage(input);
       setInput('');
+      // Reset textarea height after sending
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
+  };
+
+  // Handle Enter to submit, Shift+Enter for new line
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (input.trim() && !isStreaming) {
+        sendMessage(input);
+        setInput('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+    }
+  };
+
+  // Auto-resize textarea as content grows
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    // Reset height to auto to get the correct scrollHeight
+    e.target.style.height = 'auto';
+    // Set height to scrollHeight, capped at 150px
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
   };
 
   // Focus input when widget opens
   useEffect(() => {
-    inputRef.current?.focus();
+    textareaRef.current?.focus();
   }, []);
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 p-3 border-t border-gray-700">
-      <input
-        ref={inputRef}
-        type="text"
+    <form onSubmit={handleSubmit} className="flex gap-2 p-3 border-t border-gray-700 items-end">
+      <textarea
+        ref={textareaRef}
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
         placeholder="Ask the operations assistant..."
         disabled={isStreaming}
-        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+        rows={1}
+        className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 resize-none overflow-y-auto"
+        style={{ minHeight: '40px', maxHeight: '150px' }}
       />
       <button
         type="submit"
         disabled={!input.trim() || isStreaming}
-        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-1"
+        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium flex items-center gap-1 shrink-0"
       >
         <Send className="h-4 w-4" />
       </button>
@@ -147,9 +189,15 @@ function ChatInput() {
   );
 }
 
-// Main widget component
-export default function ChatWidget() {
-  const { messages, isOpen, setIsOpen, isStreaming, clearMessages, currentThinking, threadId } = useChat();
+// Chat panel content - shared between normal and expanded views
+function ChatPanelContent({
+  isExpanded,
+  onToggleExpand
+}: {
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+}) {
+  const { messages, setIsOpen, isStreaming, clearMessages, currentThinking, threadId } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
@@ -157,25 +205,6 @@ export default function ChatWidget() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentThinking]);
 
-  // Floating bubble when closed - positioned above the PropagationWidget (h-10 = 40px)
-  if (!isOpen) {
-    return (
-      <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-16 right-6 h-14 w-14 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all z-50 hover:scale-105"
-        title="Open Operations Assistant"
-      >
-        <MessageCircle className="h-6 w-6" />
-        {messages.length > 0 && (
-          <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-medium">
-            {messages.length}
-          </span>
-        )}
-      </button>
-    );
-  }
-
-  // Panel mode when open - NOT fixed positioning, fills parent container
   return (
     <div className="flex flex-col h-full bg-gray-900 border-l border-gray-700">
       {/* Header */}
@@ -188,6 +217,17 @@ export default function ChatWidget() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={onToggleExpand}
+            className="p-1.5 hover:bg-gray-800 rounded transition-colors"
+            title={isExpanded ? "Collapse to panel" : "Expand to full screen"}
+          >
+            {isExpanded ? (
+              <Minimize2 className="h-4 w-4 text-gray-400 hover:text-green-400" />
+            ) : (
+              <Maximize2 className="h-4 w-4 text-gray-400 hover:text-green-400" />
+            )}
+          </button>
           <button
             onClick={clearMessages}
             className="p-1.5 hover:bg-gray-800 rounded transition-colors"
@@ -243,5 +283,69 @@ export default function ChatWidget() {
       {/* Input area */}
       <ChatInput />
     </div>
+  );
+}
+
+// Main widget component
+export default function ChatWidget() {
+  const { messages, isOpen, setIsOpen, isExpanded, setIsExpanded } = useChat();
+
+  // Handle escape key to close expanded view
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isExpanded) {
+        setIsExpanded(false);
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isExpanded, setIsExpanded]);
+
+  // Floating bubble when closed - positioned above the PropagationWidget (h-10 = 40px)
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-16 right-6 h-14 w-14 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center transition-all z-50 hover:scale-105"
+        title="Open Operations Assistant"
+      >
+        <MessageCircle className="h-6 w-6" />
+        {messages.length > 0 && (
+          <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-medium">
+            {messages.length}
+          </span>
+        )}
+      </button>
+    );
+  }
+
+  // Expanded modal mode
+  if (isExpanded) {
+    return (
+      <>
+        {/* Backdrop */}
+        <div
+          className="fixed inset-0 bg-black/60 z-50"
+          onClick={() => setIsExpanded(false)}
+        />
+        {/* Modal */}
+        <div className="fixed inset-4 md:inset-8 lg:inset-12 z-50 flex items-center justify-center">
+          <div className="w-full h-full max-w-6xl bg-gray-900 rounded-lg shadow-2xl overflow-hidden">
+            <ChatPanelContent
+              isExpanded={true}
+              onToggleExpand={() => setIsExpanded(false)}
+            />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Panel mode when open - NOT fixed positioning, fills parent container
+  return (
+    <ChatPanelContent
+      isExpanded={false}
+      onToggleExpand={() => setIsExpanded(true)}
+    />
   );
 }

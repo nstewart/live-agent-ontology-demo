@@ -48,6 +48,7 @@ async def get_triple_service(session: AsyncSession = Depends(get_session)) -> Tr
 @router.get("", response_model=list[Triple])
 async def list_triples(
     subject_id: Optional[str] = None,
+    subject_ids: Optional[str] = Query(default=None, description="Comma-separated list of subject IDs"),
     predicate: Optional[str] = None,
     object_value: Optional[str] = None,
     object_type: Optional[ObjectType] = None,
@@ -55,7 +56,15 @@ async def list_triples(
     offset: int = Query(default=0, ge=0),
     service: TripleService = Depends(get_triple_service),
 ):
-    """List triples with optional filtering."""
+    """List triples with optional filtering.
+
+    Use subject_ids for batch fetching multiple subjects in a single request.
+    """
+    # If subject_ids provided, use batch query (more efficient)
+    if subject_ids:
+        ids = [s.strip() for s in subject_ids.split(",") if s.strip()]
+        return await service.list_triples_for_subjects(ids, limit=limit)
+
     filter_ = TripleFilter(
         subject_id=subject_id,
         predicate=predicate,
