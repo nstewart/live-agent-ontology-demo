@@ -161,9 +161,9 @@ OPENAI_API_KEY=sk-...
 # Using make (handles initialization)
 make up-agent
 
-# Or using docker-compose directly
-docker-compose --profile agent up -d
-docker-compose exec agents python -m src.init_checkpointer
+# Or using docker compose directly
+docker compose --profile agent up -d
+docker compose exec agents python -m src.init_checkpointer
 ```
 
 ### Chat Widget (Recommended)
@@ -190,7 +190,7 @@ The easiest way to interact with the Operations Assistant is through the embedde
 
 ```bash
 # Start interactive session with conversation memory
-docker-compose exec -it agents python -m src.main chat
+docker compose exec -it agents python -m src.main chat
 
 # Example conversation:
 > Find orders for Lisa
@@ -203,10 +203,10 @@ docker-compose exec -it agents python -m src.main chat
 
 ```bash
 # One-time query
-docker-compose exec agents python -m src.main chat "Show all OUT_FOR_DELIVERY orders"
+docker compose exec agents python -m src.main chat "Show all OUT_FOR_DELIVERY orders"
 
 # Search inventory
-docker-compose exec agents python -m src.main chat "Find stores with organic milk in stock"
+docker compose exec agents python -m src.main chat "Find stores with organic milk in stock"
 ```
 
 See [AGENTS.md](docs/AGENTS.md) for complete agent capabilities, tool descriptions, and HTTP API usage.
@@ -240,17 +240,17 @@ make up-agent
 make down
 
 # View logs
-docker-compose logs -f api
-docker-compose logs -f search-sync
+docker compose logs -f api
+docker compose logs -f search-sync
 
 # Track write propagation (clean output, strips timestamps)
-docker-compose logs -f api search-sync | sed 's/.*INFO - //'
+docker compose logs -f api search-sync | sed 's/.*INFO - //'
 
 # Restart a service
-docker-compose restart api
+docker compose restart api
 
 # Run tests
-docker-compose exec api python -m pytest tests/ -v
+docker compose exec api python -m pytest tests/ -v
 
 # See all commands
 make help
@@ -288,7 +288,7 @@ See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for development setup, testing guide
 
 ```
 freshmart-digital-twin-agent-starter/
-├── docker-compose.yml          # Service orchestration
+├── docker compose.yml          # Service orchestration
 ├── Makefile                    # Common commands
 ├── .env.example                # Environment template
 │

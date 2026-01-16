@@ -35,7 +35,7 @@ The search-sync service does not expose HTTP endpoints. Monitor health through l
 **Check Service Status**:
 ```bash
 # Verify container is running
-docker-compose ps search-sync
+docker compose ps search-sync
 
 # Expected output:
 # NAME              STATUS    PORTS
@@ -45,7 +45,7 @@ docker-compose ps search-sync
 **Check SUBSCRIBE Connection**:
 ```bash
 # Look for successful connection message
-docker-compose logs --tail=100 search-sync | grep "Starting SUBSCRIBE"
+docker compose logs --tail=100 search-sync | grep "Starting SUBSCRIBE"
 
 # Expected output:
 # [INFO] Starting SUBSCRIBE for view: orders_search_source_mv
@@ -84,7 +84,7 @@ echo "Latency: $((END - START)) seconds"
 **How to Measure**:
 ```bash
 # Count "Broadcasting" messages in last minute
-docker-compose logs --since 1m search-sync | grep "Broadcasting.*changes" | \
+docker compose logs --since 1m search-sync | grep "Broadcasting.*changes" | \
   awk '{sum+=$2} END {print sum " events in last minute"}'
 ```
 
@@ -99,7 +99,7 @@ docker-compose logs --since 1m search-sync | grep "Broadcasting.*changes" | \
 **How to Measure**:
 ```bash
 # Look for buffer size in logs (if implemented)
-docker-compose logs --tail=50 search-sync | grep "buffer"
+docker compose logs --tail=50 search-sync | grep "buffer"
 
 # Expected output:
 # [INFO] Buffer size: 245 events (backpressure: inactive)
@@ -118,10 +118,10 @@ docker-compose logs --tail=50 search-sync | grep "buffer"
 **How to Measure**:
 ```bash
 # Count errors in last hour
-docker-compose logs --since 1h search-sync | grep -i "error" | wc -l
+docker compose logs --since 1h search-sync | grep -i "error" | wc -l
 
 # Count total operations
-docker-compose logs --since 1h search-sync | grep "Broadcasting" | wc -l
+docker compose logs --since 1h search-sync | grep "Broadcasting" | wc -l
 ```
 
 **Alert Threshold**:
@@ -178,10 +178,10 @@ opensearch_sync_buffer_size
 
 ```bash
 # Start search-sync service
-docker-compose up -d search-sync
+docker compose up -d search-sync
 
 # Verify startup
-docker-compose logs -f search-sync
+docker compose logs -f search-sync
 # Wait for "Starting SUBSCRIBE for view: orders_search_source_mv"
 
 # Check OpenSearch index exists
@@ -200,34 +200,34 @@ curl http://localhost:9200/orders/_count
 
 ```bash
 # Graceful shutdown (allows pending events to flush)
-docker-compose stop search-sync
+docker compose stop search-sync
 
 # Check logs for clean shutdown
-docker-compose logs --tail=20 search-sync
+docker compose logs --tail=20 search-sync
 # Should see: "Orders sync worker stopped"
 
 # Force stop (if graceful shutdown hangs)
-docker-compose kill search-sync
+docker compose kill search-sync
 ```
 
 ### Restarting the Service
 
 ```bash
 # Restart after configuration change
-docker-compose restart search-sync
+docker compose restart search-sync
 
 # Rebuild and restart after code change
-docker-compose up -d --build search-sync
+docker compose up -d --build search-sync
 
 # Watch logs during restart
-docker-compose logs -f search-sync
+docker compose logs -f search-sync
 ```
 
 ### Checking Sync Status
 
 ```bash
 # Check last sync activity
-docker-compose logs --tail=100 search-sync | grep "Broadcasting"
+docker compose logs --tail=100 search-sync | grep "Broadcasting"
 
 # Verify data consistency between Materialize and OpenSearch
 MZ_COUNT=$(PGPASSWORD=materialize psql -h localhost -p 6875 -U materialize -t -c \
@@ -274,11 +274,11 @@ curl -s "http://localhost:9200/orders/_search" \
 
 1. **Verify Materialize is running**:
    ```bash
-   docker-compose ps mz
+   docker compose ps mz
    # Should show: Up <duration>
 
    # Check Materialize logs
-   docker-compose logs --tail=50 mz
+   docker compose logs --tail=50 mz
    ```
 
 2. **Test connection manually**:
@@ -295,13 +295,13 @@ curl -s "http://localhost:9200/orders/_search" \
 
 4. **Check connection configuration**:
    ```bash
-   docker-compose exec search-sync env | grep MZ_
+   docker compose exec search-sync env | grep MZ_
    # Verify MZ_HOST, MZ_PORT, MZ_USER, MZ_PASSWORD, MZ_DATABASE
    ```
 
 5. **Restart search-sync** (exponential backoff will retry):
    ```bash
-   docker-compose restart search-sync
+   docker compose restart search-sync
    ```
 
 **Expected Recovery**: Service should reconnect within 30 seconds
@@ -333,7 +333,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 2. **Check bulk operation performance**:
    ```bash
-   docker-compose logs --tail=100 search-sync | grep "bulk_upsert"
+   docker compose logs --tail=100 search-sync | grep "bulk_upsert"
    # Look for: "Synced N documents, 0 errors"
    # If N is large (> 1000), bulk operations may be slow
    ```
@@ -347,15 +347,15 @@ curl -s "http://localhost:9200/orders/_search" \
 
 4. **Check network latency**:
    ```bash
-   docker-compose exec search-sync ping -c 5 opensearch
+   docker compose exec search-sync ping -c 5 opensearch
    # Should show: < 1ms average
    ```
 
 5. **Reduce batch size** (if configured):
    ```bash
-   # Edit docker-compose.yml or config
+   # Edit docker compose.yml or config
    # Set: MAX_BATCH_SIZE=500 (default: 1000)
-   docker-compose up -d --build search-sync
+   docker compose up -d --build search-sync
    ```
 
 **Expected Recovery**: Latency should return to < 2 seconds within 5 minutes
@@ -388,7 +388,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 2. **Check for failed operations**:
    ```bash
-   docker-compose logs --since 24h search-sync | grep -i "error"
+   docker compose logs --since 24h search-sync | grep -i "error"
    # Look for: bulk operation failures, connection drops
    ```
 
@@ -437,7 +437,7 @@ curl -s "http://localhost:9200/orders/_search" \
 2. **Check event rate**:
    ```bash
    # Count broadcasts in last 5 minutes
-   docker-compose logs --since 5m search-sync | grep "Broadcasting" | wc -l
+   docker compose logs --since 5m search-sync | grep "Broadcasting" | wc -l
    ```
 
 3. **Check OpenSearch load**:
@@ -448,18 +448,18 @@ curl -s "http://localhost:9200/orders/_search" \
 
 4. **Restart search-sync** (clears buffer):
    ```bash
-   docker-compose restart search-sync
+   docker compose restart search-sync
    # Buffer will be cleared, snapshot discarded, streaming resumes
    ```
 
 5. **Scale OpenSearch** (if persistent):
    ```bash
    # Increase OpenSearch memory
-   # Edit docker-compose.yml:
+   # Edit docker compose.yml:
    # opensearch:
    #   environment:
    #     - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
-   docker-compose up -d opensearch
+   docker compose up -d opensearch
    ```
 
 **Expected Recovery**: Buffer should clear within 2 minutes after restart
@@ -479,7 +479,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 1. **Stop search-sync**:
    ```bash
-   docker-compose stop search-sync
+   docker compose stop search-sync
    ```
 
 2. **Delete OpenSearch index**:
@@ -528,8 +528,8 @@ curl -s "http://localhost:9200/orders/_search" \
 
 5. **Start search-sync**:
    ```bash
-   docker-compose start search-sync
-   docker-compose logs -f search-sync
+   docker compose start search-sync
+   docker compose logs -f search-sync
    # Wait for "Starting SUBSCRIBE for view: orders_search_source_mv"
    ```
 
@@ -574,7 +574,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 3. **Update search-sync configuration** (if index name changed):
    ```bash
-   # Edit docker-compose.yml or config
+   # Edit docker compose.yml or config
    # Set: OS_INDEX_NAME=orders_v2
    ```
 
@@ -592,7 +592,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 5. **Restart search-sync**:
    ```bash
-   docker-compose restart search-sync
+   docker compose restart search-sync
    ```
 
 6. **Delete old index** (after verification):
@@ -613,7 +613,7 @@ curl -s "http://localhost:9200/orders/_search" \
 
 1. **Stop current search-sync**:
    ```bash
-   docker-compose stop search-sync
+   docker compose stop search-sync
    ```
 
 2. **Checkout polling implementation**:
@@ -626,19 +626,19 @@ curl -s "http://localhost:9200/orders/_search" \
 
 3. **Update configuration**:
    ```bash
-   # Edit .env or docker-compose.yml
+   # Edit .env or docker compose.yml
    # Set: USE_SUBSCRIBE=false
    # Set: POLL_INTERVAL=5  # seconds
    ```
 
 4. **Rebuild and restart**:
    ```bash
-   docker-compose up -d --build search-sync
+   docker compose up -d --build search-sync
    ```
 
 5. **Monitor latency** (will be higher):
    ```bash
-   docker-compose logs -f search-sync
+   docker compose logs -f search-sync
    # Expect: 5-20 second latency (polling interval + batch processing)
    ```
 
@@ -761,7 +761,7 @@ FROM ...;  -- (joins triples)
 
 1. **Horizontal scaling** (multiple workers):
    ```yaml
-   # docker-compose.yml:
+   # docker compose.yml:
    search-sync:
      deploy:
        replicas: 3

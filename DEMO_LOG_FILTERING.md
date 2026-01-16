@@ -1,6 +1,6 @@
 # Demo: Log Filtering for Transactional Consistency
 
-This guide shows how to use `docker-compose logs` to demonstrate that SUBSCRIBE updates correctly identify which OpenSearch documents to update based on Materialize timestamps.
+This guide shows how to use `docker compose logs` to demonstrate that SUBSCRIBE updates correctly identify which OpenSearch documents to update based on Materialize timestamps.
 
 ## Quick Start
 
@@ -13,7 +13,7 @@ Run the automated demo:
 
 ### 1. Show All Batches with Timestamps
 ```bash
-docker-compose logs -f search-sync | grep "📦 BATCH"
+docker compose logs -f search-sync | grep "📦 BATCH"
 ```
 
 **Example Output:**
@@ -27,7 +27,7 @@ docker-compose logs -f search-sync | grep "📦 BATCH"
 
 ### 2. Show Document Operations
 ```bash
-docker-compose logs -f search-sync | grep -E "➕|🔄|❌"
+docker compose logs -f search-sync | grep -E "➕|🔄|❌"
 ```
 
 **Example Output:**
@@ -46,7 +46,7 @@ docker-compose logs -f search-sync | grep -E "➕|🔄|❌"
 
 ### 3. Show Flush Operations
 ```bash
-docker-compose logs -f search-sync | grep "💾 FLUSH"
+docker compose logs -f search-sync | grep "💾 FLUSH"
 ```
 
 **Example Output:**
@@ -61,7 +61,7 @@ docker-compose logs -f search-sync | grep "💾 FLUSH"
 
 ### 4. Full Transaction Flow
 ```bash
-docker-compose logs -f search-sync | grep -E "📦|➕|🔄|❌|💾"
+docker compose logs -f search-sync | grep -E "📦|➕|🔄|❌|💾"
 ```
 
 **Example Output (order creation with 3 line items):**
@@ -78,11 +78,11 @@ docker-compose logs -f search-sync | grep -E "📦|➕|🔄|❌|💾"
 ### 5. Show UPDATE Consolidation
 ```bash
 # Make an update
-docker-compose exec db psql -U postgres -d freshmart -c \
+docker compose exec db psql -U postgres -d freshmart -c \
   "UPDATE triples SET object_value='OUT_FOR_DELIVERY' WHERE subject_id='order:FM-12345' AND predicate='order_status';"
 
 # Watch logs
-docker-compose logs --tail=20 search-sync | grep -E "📦|🔄|💾"
+docker compose logs --tail=20 search-sync | grep -E "📦|🔄|💾"
 ```
 
 **Example Output:**
@@ -118,7 +118,7 @@ docker-compose logs --tail=20 search-sync | grep -E "📦|🔄|💾"
 
 ### View All Tuples Being Written in a Transaction
 ```bash
-docker-compose logs -f api | grep -E "🔵|📝|✅"
+docker compose logs -f api | grep -E "🔵|📝|✅"
 ```
 
 **Example Output:**
@@ -138,7 +138,7 @@ docker-compose logs -f api | grep -E "🔵|📝|✅"
 
 ### Show Complete Flow: PostgreSQL → Materialize → OpenSearch
 ```bash
-docker-compose logs -f api search-sync | grep -E "🔵|📝|✅|📦|➕|🔄|💾|mz_ts="
+docker compose logs -f api search-sync | grep -E "🔵|📝|✅|📦|➕|🔄|💾|mz_ts="
 ```
 
 **Example Output:**
@@ -183,7 +183,7 @@ curl -X POST http://localhost:8080/triples/batch -H "Content-Type: application/j
 
 **Action:**
 ```bash
-docker-compose exec db psql -U postgres -d freshmart -c \
+docker compose exec db psql -U postgres -d freshmart -c \
   "UPDATE triples SET object_value='DELIVERED' WHERE subject_id='order:FM-XXXXX' AND predicate='order_status';"
 ```
 
@@ -206,7 +206,7 @@ docker-compose exec db psql -U postgres -d freshmart -c \
 **Action:**
 ```bash
 # Update a product's base price
-docker-compose exec db psql -U postgres -d freshmart -c \
+docker compose exec db psql -U postgres -d freshmart -c \
   "UPDATE triples SET object_value='15.99' WHERE subject_id='product:prod0001' AND predicate='base_price';"
 ```
 
@@ -228,24 +228,24 @@ docker-compose exec db psql -U postgres -d freshmart -c \
 
 ### Show Only Specific Index
 ```bash
-docker-compose logs -f search-sync | grep "→ orders"
+docker compose logs -f search-sync | grep "→ orders"
 ```
 
 ### Show Only Timestamps
 ```bash
-docker-compose logs -f search-sync | grep -oP 'mz_ts=\K[0-9]+'
+docker compose logs -f search-sync | grep -oP 'mz_ts=\K[0-9]+'
 ```
 
 ### Count Events by Type
 ```bash
-docker-compose logs search-sync | grep -c "➕ Inserts"
-docker-compose logs search-sync | grep -c "🔄 Updates"
-docker-compose logs search-sync | grep -c "❌ Deletes"
+docker compose logs search-sync | grep -c "➕ Inserts"
+docker compose logs search-sync | grep -c "🔄 Updates"
+docker compose logs search-sync | grep -c "❌ Deletes"
 ```
 
 ### Watch Multiple Services
 ```bash
-docker-compose logs -f search-sync api | grep -E "📦|💾|POST /triples"
+docker compose logs -f search-sync api | grep -E "📦|💾|POST /triples"
 ```
 
 ---
@@ -256,26 +256,26 @@ docker-compose logs -f search-sync api | grep -E "📦|💾|POST /triples"
 
 1. Check service is running:
    ```bash
-   docker-compose ps search-sync
+   docker compose ps search-sync
    ```
 
 2. Check LOG_LEVEL:
    ```bash
-   docker-compose exec search-sync env | grep LOG_LEVEL
+   docker compose exec search-sync env | grep LOG_LEVEL
    # Should be INFO or DEBUG
    ```
 
 3. Restart with verbose logging:
    ```bash
-   docker-compose up -d search-sync
-   docker-compose logs -f search-sync
+   docker compose up -d search-sync
+   docker compose logs -f search-sync
    ```
 
 ### Logs Too Verbose?
 
 Filter to just transaction boundaries:
 ```bash
-docker-compose logs -f search-sync | grep -E "BATCH|FLUSH"
+docker compose logs -f search-sync | grep -E "BATCH|FLUSH"
 ```
 
 ---
@@ -284,7 +284,7 @@ docker-compose logs -f search-sync | grep -E "BATCH|FLUSH"
 
 ### Average Events per Batch
 ```bash
-docker-compose logs search-sync | \
+docker compose logs search-sync | \
   grep "BATCH" | \
   grep -oP 'Processing \K[0-9]+' | \
   awk '{sum+=$1; n++} END {print "Average:", sum/n}'
@@ -292,7 +292,7 @@ docker-compose logs search-sync | \
 
 ### Total Events Processed
 ```bash
-docker-compose logs search-sync | \
+docker compose logs search-sync | \
   grep "total received" | \
   tail -1 | \
   grep -oP 'total received: \K[0-9]+'
@@ -310,7 +310,7 @@ docker-compose logs search-sync | \
 
 **Best Command for Demos:**
 ```bash
-docker-compose logs -f --tail=0 search-sync | grep --color=always -E "📦|➕|🔄|❌|💾|mz_ts="
+docker compose logs -f --tail=0 search-sync | grep --color=always -E "📦|➕|🔄|❌|💾|mz_ts="
 ```
 
 This shows just the important events with color highlighting.

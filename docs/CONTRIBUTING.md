@@ -41,7 +41,7 @@ OPENAI_API_KEY=sk-...
 make up
 
 # 5. Verify services are running
-docker-compose ps
+docker compose ps
 ```
 
 ### Development Workflow
@@ -57,8 +57,8 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 
 # Run with hot reload (inside container)
-docker-compose up -d api
-docker-compose logs -f api
+docker compose up -d api
+docker compose logs -f api
 ```
 
 **Web Development (React/TypeScript)**:
@@ -92,7 +92,7 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 
 # Test interactively
-docker-compose exec -it agents python -m src.main chat
+docker compose exec -it agents python -m src.main chat
 ```
 
 **Search Sync Worker (Python)**:
@@ -106,7 +106,7 @@ pip install -r requirements.txt
 python -m pytest tests/ -v
 
 # Watch logs
-docker-compose logs -f search-sync
+docker compose logs -f search-sync
 ```
 
 ### Claude Code with Materialize MCP Server
@@ -155,7 +155,7 @@ For more details, see the [Materialize MCP Server developer docs](https://github
 
 ```
 freshmart-digital-twin-agent-starter/
-├── docker-compose.yml          # Service orchestration
+├── docker compose.yml          # Service orchestration
 ├── Makefile                    # Common commands
 ├── .env.example                # Environment template
 │
@@ -276,7 +276,7 @@ Requires running database connections:
 make up
 
 # Verify databases are ready
-docker-compose exec api python -c "from src.config import settings; print(settings.pg_external_url)"
+docker compose exec api python -c "from src.config import settings; print(settings.pg_external_url)"
 ```
 
 ### Run Integration Tests
